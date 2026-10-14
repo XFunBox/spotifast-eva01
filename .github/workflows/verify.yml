@@ -1,0 +1,41 @@
+name: Verify EVA-01 deployment
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Regression tests and shell syntax
+        run: |
+          python3 -m unittest discover -s tests -p 'test_linux.py' -v
+          bash -n install-linux.sh
+      - name: Install pinned AppImage in isolated profile
+        run: |
+          bash install-linux.sh --root "$RUNNER_TEMP/eva smoke"
+          APPIMAGE_EXTRACT_AND_RUN=1 "$RUNNER_TEMP/eva smoke/.local/opt/eva-01-audio/Spotifast.AppImage" --version
+      - name: Verify desktop launcher
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y desktop-file-utils
+          desktop-file-validate "$RUNNER_TEMP/eva smoke/.local/share/applications/eva-01-audio.desktop"
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Regression tests on Windows PowerShell 5.1
+        shell: powershell
+        run: .\tests\test-windows.ps1
+      - name: Install pinned binary in isolated profile
+        shell: powershell
+        run: |
+          $profileRoot = Join-Path $env:RUNNER_TEMP 'eva smoke'
+          .\eva\install-windows.ps1 -Root $profileRoot
+          $binary = Join-Path $profileRoot 'AppData\Local\Programs\EVA-01 Audio\spotifast.exe'
+          & $binary --version
+          if ($LASTEXITCODE -ne 0) { throw 'Spotifast did not start' }
