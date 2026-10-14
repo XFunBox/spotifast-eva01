@@ -39,5 +39,10 @@ jobs:
           $profileRoot = Join-Path $env:RUNNER_TEMP 'eva smoke'
           .\eva\install-windows.ps1 -Root $profileRoot
           $binary = Join-Path $profileRoot 'AppData\Local\Programs\EVA-01 Audio\spotifast.exe'
-          & $binary --version
-          if ($LASTEXITCODE -ne 0) { throw 'Spotifast did not start' }
+          $stdout = Join-Path $env:RUNNER_TEMP 'spotifast-version.txt'
+          $stderr = Join-Path $env:RUNNER_TEMP 'spotifast-version-error.txt'
+          $process = Start-Process -FilePath $binary -ArgumentList '--version' -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          if ($process.ExitCode -ne 0) { throw "Spotifast exited with $($process.ExitCode)" }
+          $version = (Get-Content -LiteralPath $stdout -Raw).Trim()
+          if ($version -ne 'spotifast 0.13.0') { throw "Unexpected version: $version" }
+          Write-Output $version
