@@ -15,14 +15,16 @@ jobs:
         run: |
           python3 -m unittest discover -s tests -p 'test_linux.py' -v
           bash -n install-linux.sh
+      - name: Install official Linux runtime dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libdbus-1-3 libx11-xcb1 libpulse0 libasound2t64 libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 libwayland-cursor0 libwayland-egl1 libgl1 libegl1 libx11-6 libxcursor1 libxi6 libxrandr2 desktop-file-utils
       - name: Install pinned AppImage in isolated profile
         run: |
           bash install-linux.sh --root "$RUNNER_TEMP/eva smoke"
           APPIMAGE_EXTRACT_AND_RUN=1 "$RUNNER_TEMP/eva smoke/.local/opt/eva-01-audio/Spotifast.AppImage" --version
       - name: Verify desktop launcher
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y desktop-file-utils
           desktop-file-validate "$RUNNER_TEMP/eva smoke/.local/share/applications/eva-01-audio.desktop"
   windows:
     runs-on: windows-latest

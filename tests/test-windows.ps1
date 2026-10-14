@@ -116,6 +116,7 @@ try {
 
     # Las funciones quedan en el ambito de prueba al dot-source con DryRun.
     . $installer -Root $profile -DryRun
+    Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $unsafeZip = Join-Path $fixture 'unsafe.zip'
     $zip = [IO.Compression.ZipFile]::Open($unsafeZip, [IO.Compression.ZipArchiveMode]::Create)

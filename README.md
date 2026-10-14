@@ -8,6 +8,12 @@ Spotifast 0.13.0 con temas Evangelion, skin NERV e instaladores para Linux y Win
 
 Cierra Spotifast antes de instalar. Necesitas Python 3.9 o posterior, conexión a Internet y Linux x86_64 o ARM64 compatible con el AppImage oficial. La base del binario es glibc 2.39 (Ubuntu 24.04 o posterior). No necesita compilar Rust ni instalar como administrador.
 
+En Ubuntu 24.04, si faltan las bibliotecas de escritorio/audio:
+
+```bash
+sudo apt install python3 libdbus-1-3 libx11-xcb1 libpulse0 libasound2t64 libfuse2t64 libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 libwayland-cursor0 libwayland-egl1 libgl1 libegl1 libx11-6 libxcursor1 libxi6 libxrandr2
+```
+
 ```bash
 git clone https://github.com/XFunBox/spotifast-eva01.git
 cd spotifast-eva01

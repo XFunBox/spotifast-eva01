@@ -53,6 +53,7 @@ function Copy-EvaResource([string]$Source, [string]$Destination, [string]$Backup
     }
 }
 function Expand-EvaZip([string]$ArchivePath, [string]$Destination) {
+    Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [IO.Compression.ZipFile]::OpenRead($ArchivePath)
     try {
