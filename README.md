@@ -44,7 +44,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\eva\install-windows.ps
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\eva\restore-windows.ps1
 ```
 
-Al ser un repositorio privado, clonar o descargar el código requiere una cuenta autorizada. Puedes copiar el paquete descargado a tus otros equipos; los instaladores obtienen el reproductor desde la publicación pública oficial.
+El repositorio es público. Puedes clonar el código o descargar el ZIP de [EVA-01 Audio v1.1.0](https://github.com/XFunBox/spotifast-eva01/releases/tag/v1.1.0), que incluye Spotifast 0.13.3 y NERV Nightshift. La entrega incluye `SHA256SUMS.txt` para verificar el paquete; los instaladores obtienen el reproductor oficial y comprueban su SHA-256.
 
 ## Temas y controles
 
