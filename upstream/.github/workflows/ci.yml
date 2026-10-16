@@ -18,13 +18,17 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Dependencies come only from crates.io or from crmne repositories, and
+  # Dependencies come only from crates.io or from crmne repositories,
   # review evidence (captures, comparison pages, recordings) stays in the pull
-  # request instead of the tree. See CONTRIBUTING.md.
+  # request instead of the tree, and a pull request adds no setting without
+  # the maintainer's approval. See CONTRIBUTING.md.
   policy:
     name: policy
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v7
       - name: Dependency sources
@@ -35,6 +39,21 @@ jobs:
       - name: Policy check regressions
         if: ${{ !cancelled() }}
         run: python3 .github/scripts/test-policy-checks.py
+      # Pull requests only: the maintainer's own commits on main are not
+      # checked. The label is read when the job runs, so after adding
+      # setting-approved, re-run this job.
+      - name: New settings need approval
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE"
+          labels=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/labels" --jq '.[].name')
+          approved=()
+          if grep -qx setting-approved <<< "$labels"; then approved=(--approved); fi
+          python3 .github/scripts/check-new-settings.py --base "$BASE" "${approved[@]}"
 
   quality:
     name: quality

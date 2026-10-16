@@ -168,6 +168,74 @@ pub(crate) fn clear_search(ctx: &egui::Context) {
 }
 const PROXY_DIRTY_ID: &str = "proxy-settings-dirty";
 
+/// A frame-rate dial: 30, 60, the screen's rate once known, the current rate
+/// and Uncapped. Returns the rate a move lands on.
+fn frame_rate_dial(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    locale: crate::i18n::Locale,
+    screen_hz: u32,
+    fps: u32,
+) -> Option<u32> {
+    // The dial stops at the rates worth having and passes
+    // through nothing in between, the way a gear lever does.
+    let stops = crate::milkdrop::fps_stops(screen_hz, fps);
+    let last = stops.len().saturating_sub(1);
+    let mut at = stops.iter().position(|rate| *rate == fps).unwrap_or(1);
+    let labels: Vec<String> = stops
+        .iter()
+        .map(|rate| crate::milkdrop::fps_label(locale, *rate, screen_hz))
+        .collect();
+    let shown = labels.clone();
+    let typed = stops.clone();
+    let changed = setting_slider(
+        ui,
+        palette,
+        &mut at,
+        0..=last,
+        |slider| slider.step_by(1.0),
+        // A drag moves one stop every twenty points.
+        |value| {
+            value
+                .speed(0.05)
+                .custom_formatter(move |value, _| {
+                    shown
+                        .get((value.round().max(0.0) as usize).min(shown.len() - 1))
+                        .cloned()
+                        .unwrap_or_default()
+                })
+                .custom_parser(move |text| {
+                    // A rate typed in lands on the nearest stop, since
+                    // the stops are all this dial can hold.
+                    let text = text.trim().to_lowercase();
+                    if text.starts_with("un") {
+                        return Some(typed.len().saturating_sub(1) as f64);
+                    }
+                    let wanted: u32 = text
+                        .trim_end_matches("fps")
+                        .trim()
+                        .split(',')
+                        .next()?
+                        .trim()
+                        .parse()
+                        .ok()?;
+                    typed
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, rate)| **rate > 0)
+                        .min_by_key(|(_, rate)| rate.abs_diff(wanted))
+                        .map(|(index, _)| index as f64)
+                })
+        },
+    )
+    .changed();
+    if changed {
+        stops.get(at).copied()
+    } else {
+        None
+    }
+}
+
 fn section(
     ui: &mut egui::Ui,
     palette: &Palette,
@@ -895,6 +963,13 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             player_bar_vis_click.clone(),
             gettext(locale, "Allow clicks on empty player bar space to cycle the visualizer."),
         ),
+        RowText::new(
+            gettext(locale, "Frame rate"),
+            gettext(
+                locale,
+                "How often the player bar and mini player visualizers draw. Lower rates use fewer resources. MilkDrop has its own.",
+            ),
+        ),
     ];
     if section_matches(&needle, &appearance, &appearance_rows) {
         any_visible = true;
@@ -1094,6 +1169,25 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     )
                     .changed()
                     {
+                        changed = true;
+                    }
+                },
+            );
+            filtered_row(
+                ui,
+                &palette,
+                &needle,
+                &appearance,
+                &appearance_rows[10],
+                |ui| {
+                    if let Some(rate) = frame_rate_dial(
+                        ui,
+                        &palette,
+                        locale,
+                        app.visualiser_screen_hz(),
+                        app.settings.visualizer_fps,
+                    ) {
+                        app.settings.visualizer_fps = rate;
                         changed = true;
                     }
                 },
@@ -1489,7 +1583,9 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     }
 
     let presets_folder = app.dirs.milkdrop_dir();
-    app.winamp.presets.refresh(&presets_folder);
+    app.winamp
+        .presets
+        .refresh(&presets_folder, Some(ui.ctx().clone()));
     let count = app.winamp.presets.count();
     let screen_hz = app.settings.milkdrop_screen_hz;
     let milkdrop_window = gettext(locale, "MilkDrop window");
@@ -1545,7 +1641,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         RowText::new(
             gettext(locale, "Frame rate"),
             match screen_hz {
-                0 => gettext(
+                hz if !crate::milkdrop::is_screen_rate(hz) => gettext(
                     locale,
                     "Lower rates use fewer resources. Uncapped draws as fast as possible.",
                 ),
@@ -1650,61 +1746,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 }
             });
             filtered_row(ui, &palette, &needle, "MilkDrop", &milkdrop_rows[3], |ui| {
-                let fps = app.settings.milkdrop_fps;
-                // The dial stops at the rates worth having and passes
-                // through nothing in between, the way a gear lever does.
-                let stops = crate::milkdrop::fps_stops(screen_hz, fps);
-                let last = stops.len().saturating_sub(1);
-                let mut at = stops.iter().position(|rate| *rate == fps).unwrap_or(1);
-                let labels: Vec<String> = stops
-                    .iter()
-                    .map(|rate| crate::milkdrop::fps_label(locale, *rate, screen_hz))
-                    .collect();
-                let shown = labels.clone();
-                let typed = stops.clone();
-                let changed = setting_slider(
-                    ui,
-                    &palette,
-                    &mut at,
-                    0..=last,
-                    |slider| slider.step_by(1.0),
-                    // A drag moves one stop every twenty points.
-                    |value| {
-                        value
-                            .speed(0.05)
-                            .custom_formatter(move |value, _| {
-                                shown
-                                    .get((value.round().max(0.0) as usize).min(shown.len() - 1))
-                                    .cloned()
-                                    .unwrap_or_default()
-                            })
-                            .custom_parser(move |text| {
-                                // A rate typed in lands on the nearest stop, since
-                                // the stops are all this dial can hold.
-                                let text = text.trim().to_lowercase();
-                                if text.starts_with("un") {
-                                    return Some(typed.len().saturating_sub(1) as f64);
-                                }
-                                let wanted: u32 = text
-                                    .trim_end_matches("fps")
-                                    .trim()
-                                    .split(',')
-                                    .next()?
-                                    .trim()
-                                    .parse()
-                                    .ok()?;
-                                typed
-                                    .iter()
-                                    .enumerate()
-                                    .filter(|(_, rate)| **rate > 0)
-                                    .min_by_key(|(_, rate)| rate.abs_diff(wanted))
-                                    .map(|(index, _)| index as f64)
-                            })
-                    },
-                )
-                .changed();
-                if changed && let Some(rate) = stops.get(at) {
-                    app.actions.push(Action::SetMilkdropFps(*rate));
+                if let Some(rate) =
+                    frame_rate_dial(ui, &palette, locale, screen_hz, app.settings.milkdrop_fps)
+                {
+                    app.actions.push(Action::SetMilkdropFps(rate));
                 }
             });
             filtered_row(ui, &palette, &needle, "MilkDrop", &milkdrop_rows[4], |ui| {

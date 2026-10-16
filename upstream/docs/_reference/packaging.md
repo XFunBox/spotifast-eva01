@@ -40,6 +40,9 @@ Cancel. Closing ends the installed copy immediately, so unsaved changes may be
 lost. A silent uninstall stops without removing files, while a silent update
 closes the installed copy first. A portable copy elsewhere is never closed and
 never blocks either.
+Uninstalling the package also removes the folders the updater stages updates
+in (`.spotifast-update-*` inside the installation folder); an update keeps
+them, since the updater runs the package from one.
 See the repository's [maintainer packaging guide](https://github.com/crmne/spotifast/blob/main/PACKAGING.md)
 for commands and the shared tool's [platform coverage](https://github.com/crmne/native-packages/blob/main/docs/platforms.md)
 for the boundaries.

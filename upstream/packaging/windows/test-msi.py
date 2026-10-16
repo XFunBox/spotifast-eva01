@@ -326,6 +326,30 @@ class PackageTest(unittest.TestCase):
         self.assertFalse(key_exists(INNO_KEY))
         self.assertFalse(self.default_folder.exists())
 
+    def stage_update(self, name="0123456789abcdef"):
+        """A staging folder as fastframe-update leaves one: its helper and
+        the previous version, some of it nested and read-only."""
+        staging = self.folder / f".spotifast-update-{name}"
+        (staging / "previous").mkdir(parents=True)
+        (staging / "helper.exe").write_bytes(b"helper")
+        (staging / "result.txt").write_text("Updated to 1.0.0")
+        backup = staging / "previous" / "spotifast.exe"
+        backup.write_bytes(b"previous")
+        os.chmod(backup, 0o444)
+        return staging
+
+    def hold(self, path):
+        """Keeps PATH open, as a running helper keeps its own file: Windows
+        refuses to delete it meanwhile."""
+        handle = open(path, "rb")
+        self.addCleanup(handle.close)
+        return handle
+
+    def assertFolderGone(self):
+        if self.folder.exists():
+            left = sorted(str(path.relative_to(self.folder)) for path in self.folder.rglob("*"))
+            self.fail(f"{self.folder} still holds {left}\n" + read_log(self.logs[-1])[-20000:])
+
     def assertRemoved(self):
         self.assertFalse(self.folder.exists() and any(p.name in FILES for p in self.folder.iterdir()))
         self.assertEqual(installed_products(), [])
@@ -341,7 +365,52 @@ class PackageTest(unittest.TestCase):
         self.assertFalse(self.desktop.exists())
         self.assertSucceeded(self.uninstall(FIRST))
         self.assertRemoved()
-        self.assertFalse(self.folder.exists())
+        self.assertFolderGone()
+
+    def test_uninstall_removes_what_the_updater_staged(self):
+        self.assertSucceeded(self.install_like_the_updater(FIRST))
+        self.stage_update()
+        self.stage_update("abc")
+        self.assertSucceeded(self.uninstall(FIRST))
+        self.assertRemoved()
+        self.assertFolderGone()
+
+    def test_uninstall_removes_only_staging_folders_and_goes_on_past_a_held_file(self):
+        self.assertSucceeded(self.install_like_the_updater(FIRST))
+        held = self.stage_update()
+        cleared = self.stage_update("abc")
+        handle = self.hold(held / "helper.exe")
+        mine = self.folder / "notes"
+        mine.mkdir()
+        (mine / "keep.txt").write_text("not Spotifast's")
+        (self.folder / ".spotifast-update-file").write_text("not a folder")
+        (self.folder / ".spotifast-updater").mkdir()
+        self.assertSucceeded(self.uninstall(FIRST))
+        self.assertRemoved()
+        self.assertFalse(cleared.exists())
+        self.assertEqual({path.name for path in held.rglob("*")}, {"helper.exe"})
+        self.assertEqual((mine / "keep.txt").read_text(), "not Spotifast's")
+        self.assertTrue((self.folder / ".spotifast-update-file").is_file())
+        self.assertTrue((self.folder / ".spotifast-updater").is_dir())
+        handle.close()
+
+    def test_update_keeps_what_the_updater_staged(self):
+        # The old version is uninstalled inside the update, while the
+        # updater's helper runs it from its staging folder.
+        self.assertSucceeded(self.install_like_the_updater(FIRST))
+        staging = self.stage_update()
+        before = {path.relative_to(staging): path.read_bytes() for path in staging.rglob("*") if path.is_file()}
+        handle = self.hold(staging / "helper.exe")
+        self.assertSucceeded(self.install_like_the_updater(SECOND))
+        self.assertInstalled(SECOND)
+        self.assertEqual(
+            {path.relative_to(staging): path.read_bytes() for path in staging.rglob("*") if path.is_file()},
+            before,
+        )
+        handle.close()
+        self.assertSucceeded(self.uninstall(SECOND))
+        self.assertRemoved()
+        self.assertFolderGone()
 
     def test_uninstall_leaves_links_another_program_took_over(self):
         self.assertSucceeded(self.install_like_the_updater(FIRST))
@@ -406,11 +475,8 @@ class PackageTest(unittest.TestCase):
         self.assertTrue(key_exists(INNO_KEY))
         self.assertTrue(self.start_menu.exists())
         self.assertEqual(self.desktop.exists(), "desktopicon" in tasks)
-        # What the updater leaves beside the app: never the package's to remove.
-        staging = self.folder / ".spotifast-update-0123456789abcdef"
-        staging.mkdir()
-        (staging / "result.txt").write_text("Updated to 1.0.0")
-        return staging
+        # What the updater leaves beside the app: kept by the takeover.
+        return self.stage_update()
 
     def test_updater_takes_over_an_inno_install(self):
         staging = self.install_with_inno("desktopicon")
@@ -422,7 +488,7 @@ class PackageTest(unittest.TestCase):
         # The package now owns what Inno Setup put there.
         self.assertSucceeded(self.uninstall(SECOND))
         self.assertRemoved()
-        self.assertTrue((staging / "result.txt").exists())
+        self.assertFolderGone()
 
     def test_package_run_by_hand_takes_over_an_inno_install_where_it_is(self):
         self.install_with_inno()

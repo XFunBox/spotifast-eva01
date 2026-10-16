@@ -10,7 +10,8 @@
   shortcut, an optional desktop shortcut and the spotify: links, as the Inno
   Setup program (spotifast.iss) installed it. A running copy is closed before
   an update replaces it, and uninstalling never leaves part of Spotifast
-  behind while it runs (running-copy.c).
+  behind while it runs (running-copy.c). Uninstalling also removes what the
+  updater staged in the folder; an update never does (update-leftovers.c).
 
   The updater runs it as
     msiexec /i PACKAGE /qn /norestart /l*v LOG INSTALLFOLDER=<the app's folder>
@@ -163,10 +164,8 @@
         <RegistryValue Root="HKCU" Key="$(InstallerKey)" Name="InstallFolder" Type="string"
           Value="[INSTALLFOLDER]" KeyPath="yes" />
         <!--
-          Only an empty folder goes. fastframe-update stages its helper and
-          the previous version in .spotifast-update-* inside this folder
-          while it runs the package, so never remove the folder's contents
-          (no util:RemoveFolderEx here).
+          Only an empty folder goes: RemoveUpdateLeftovers (below) has emptied
+          it of the updater's staging folders on a real uninstall.
         -->
         <RemoveFolder Id="RemoveInstallFolder" On="uninstall" />
 
@@ -262,13 +261,50 @@
       <ComponentGroupRef Id="Shortcuts" />
     </Feature>
 
+    <!-- running-copy.c and update-leftovers.c. -->
+    <Binary Id="CustomActions" SourceFile="$(CustomActions)" />
+
     <!-- A running copy: see running-copy.c. -->
-    <Binary Id="RunningCopy" SourceFile="$(CustomActions)" />
-    <CustomAction Id="CheckRunningCopy" BinaryRef="RunningCopy" DllEntry="CheckRunningCopy"
+    <CustomAction Id="CheckRunningCopy" BinaryRef="CustomActions" DllEntry="CheckRunningCopy"
       Execute="immediate" Return="check" />
+
+    <!--
+      What the updater leaves here: see update-leftovers.c. fastframe-update
+      stages each update in .spotifast-update-<suffix> inside INSTALLFOLDER,
+      and runs msiexec /i from the helper in it, beside a copy of the
+      previous version. Those go on a real uninstall and never otherwise.
+
+      In an update the new package removes the old one (RemoveExistingProducts)
+      in a session of the old package's own, with UPGRADINGPRODUCTCODE set,
+      and that session runs the old package's uninstall actions: an
+      On="uninstall" removal there would delete the running helper and its
+      backup mid-update. So the action's sequence condition, evaluated when
+      that session runs and not when the component was installed, requires
+      REMOVE="ALL" without UPGRADINGPRODUCTCODE.
+
+      Not util:RemoveFolderEx: it removes one folder named by a property,
+      and these have random names. Pointed at INSTALLFOLDER instead, it would
+      delete everything in a folder the user may have chosen and shared with
+      other files. Its removals would also run through RemoveFiles, where a
+      file held open asks for a restart; here such a file just stays.
+
+      Deferred, before RemoveFiles: that action also removes the folder for
+      RemoveInstallFolder (a RemoveFile row), after the package's own files,
+      so the staging folders must be gone by then. It always succeeds:
+      leftovers it cannot remove never fail an uninstall. A rolled-back
+      uninstall does not bring them back, and nothing needs them once
+      Spotifast is going.
+    -->
+    <SetProperty Id="RemoveUpdateLeftovers" Value="[INSTALLFOLDER]" Before="RemoveUpdateLeftovers"
+      Sequence="execute" Condition='REMOVE = "ALL" AND NOT UPGRADINGPRODUCTCODE' />
+    <CustomAction Id="RemoveUpdateLeftovers" BinaryRef="CustomActions" DllEntry="RemoveUpdateLeftovers"
+      Execute="deferred" Impersonate="yes" Return="ignore" />
+
     <InstallExecuteSequence>
       <!-- The package being replaced in an update has nothing to check. -->
       <Custom Action="CheckRunningCopy" Before="InstallValidate" Condition="NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="RemoveUpdateLeftovers" Before="RemoveFiles"
+        Condition='REMOVE = "ALL" AND NOT UPGRADINGPRODUCTCODE' />
     </InstallExecuteSequence>
 
     <!-- The wizard: welcome, license, folder and desktop shortcut, install, launch. -->

@@ -12,7 +12,8 @@ pairs override the package's identity, which only test-msi.py does.
 Needs Windows, the WiX Toolset 5 command line
 (dotnet tool install --global wix --version 5.0.2) and the MSVC compiler for
 ARCH on PATH, from a Visual Studio developer prompt (CI uses
-ilammy/msvc-dev-cmd), for the custom action in running-copy.c. It writes
+ilammy/msvc-dev-cmd), for the custom actions in running-copy.c and
+update-leftovers.c. It writes
 nothing beside PACKAGE: native-packages refuses any other output.
 """
 
@@ -26,6 +27,8 @@ import tempfile
 
 HERE = Path(__file__).resolve().parent
 WIX = "5.0.2"
+# The package's custom actions, built into one library.
+ACTIONS = ("running-copy.c", "update-leftovers.c")
 EXTENSIONS = (f"WixToolset.UI.wixext/{WIX}", f"WixToolset.Util.wixext/{WIX}")
 # native-packages architecture: WiX -arch value and PE machine type.
 ARCHES = {"amd64": ("x64", 0x8664), "arm64": ("arm64", 0xAA64)}
@@ -150,11 +153,11 @@ def build(payload, package, version, arch, defines=()):
 
     with tempfile.TemporaryDirectory(prefix="spotifast-msi-") as directory:
         work = Path(directory)
-        actions = work / "running-copy.dll"
-        # File names, not folders: a folder's closing backslash would escape
-        # the quote MSVC reads around a path with a space.
-        run(["cl", "/nologo", "/W4", "/WX", "/O1", "/MT", "/guard:cf", "/LD", HERE / "running-copy.c",
-             f"/Fo{work / 'running-copy.obj'}", f"/Fe{actions}", "/link", "/guard:cf", "msi.lib"], cwd=work)
+        actions = work / "custom-actions.dll"
+        # Objects land in the working folder (cwd). No /Fo folder: its closing
+        # backslash would escape the quote MSVC reads around a path with a space.
+        run(["cl", "/nologo", "/W4", "/WX", "/O1", "/MT", "/guard:cf", "/LD", *(HERE / name for name in ACTIONS),
+             f"/Fe{actions}", "/link", "/guard:cf", "msi.lib"], cwd=work)
         if pe_machine(actions) != machine:
             raise SystemExit(f"The MSVC environment does not build for {arch}")
         rtf = work / "license.rtf"

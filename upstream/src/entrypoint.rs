@@ -477,9 +477,8 @@ pub(crate) fn run() -> eframe::Result<()> {
     if let Some(name) = cli.device_name {
         settings.device_name = name;
     }
-    #[cfg(target_os = "linux")]
-    spotifast::window::init_linux_window_controls();
-    spotifast::window::set_custom_titlebar(settings.custom_titlebar);
+    fastframe_titlebar::init();
+    fastframe_titlebar::set_enabled(settings.custom_titlebar);
     // Colour emoji: the fonts are found off this thread. A demo capture
     // draws every picture in the frame that shows it.
     #[cfg(feature = "demo")]
@@ -586,7 +585,7 @@ pub(crate) fn run() -> eframe::Result<()> {
         let creator_shot = shot.clone();
         let mini = lease.peek(MiniWindow::wanted);
         let geometry = lease.peek(main_geometry);
-        #[cfg(all(windows, target_arch = "aarch64"))]
+        #[cfg(windows)]
         let locale = lease.peek(|app| app.locale);
         #[cfg(feature = "demo")]
         let options = {
@@ -687,12 +686,14 @@ pub(crate) fn run() -> eframe::Result<()> {
                     shot: creator_shot.clone(),
                     #[cfg(feature = "demo")]
                     drag: demo_drag,
+                    stalls: fastframe_shell::StallWatch::default(),
+                    screen_asked: None,
                 }))
             }),
         )
         .inspect_err(|error| {
             log::error!("Native window failed: {error}");
-            #[cfg(all(windows, target_arch = "aarch64"))]
+            #[cfg(windows)]
             if matches!(
                 error,
                 eframe::Error::Glutin(_)
@@ -863,7 +864,7 @@ fn native_options(
                 .with_title_shown(false)
                 // Windows has no equivalent to macOS's floating traffic lights.
                 // Removing its decorations lets the app surface fill the window.
-                .with_decorations(main_window_decorated(spotifast::window::custom_titlebar()))
+                .with_decorations(main_window_decorated(fastframe_titlebar::enabled()))
                 .with_inner_size(size)
                 .with_min_inner_size(inner_size.unwrap_or(spotifast::window::MAIN_MIN_SIZE))
                 .with_fullscreen(fullscreen);
@@ -1064,7 +1065,7 @@ mod native_window_tests {
         let options = native_options(false, None, None, Geometry::default());
         assert_eq!(
             options.viewport.decorations,
-            Some(!spotifast::window::custom_titlebar())
+            Some(!fastframe_titlebar::enabled())
         );
         assert_eq!(options.viewport.fullsize_content_view, Some(true));
         assert_eq!(options.viewport.titlebar_shown, Some(false));
@@ -1219,6 +1220,132 @@ struct Shell {
     /// A drag held for `--demo-drag`, if this run shows one.
     #[cfg(feature = "demo")]
     drag: Option<DemoDrag>,
+    /// Logs a warning when an update freezes the window.
+    stalls: fastframe_shell::StallWatch,
+    /// Where the window was when it last asked its monitor's refresh rate,
+    /// and when.
+    screen_asked: Option<(Option<egui::Rect>, std::time::Instant)>,
+}
+
+impl Shell {
+    /// Asks the monitor showing the window how often it refreshes, for the
+    /// visualizers' frame-rate dial: whenever the window moves, and
+    /// otherwise once a second, as a display can change its mode in place
+    /// and Wayland names the monitor only once the window is on it. A
+    /// monitor with no usable answer clears the window's rate rather than
+    /// keeping the last screen's, so the dial falls back to MilkDrop's.
+    fn read_screen_hz(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
+        let place = ctx.input(|input| input.viewport().outer_rect);
+        if let Some((asked, when)) = self.screen_asked
+            && asked == place
+            && when.elapsed() < std::time::Duration::from_secs(1)
+        {
+            return;
+        }
+        self.screen_asked = Some((place, std::time::Instant::now()));
+        self.app.screen_hz = frame
+            .winit_window()
+            .and_then(|window| window.current_monitor())
+            .and_then(|monitor| monitor.refresh_rate_millihertz())
+            .and_then(spotifast::milkdrop::screen_hz)
+            .unwrap_or(0);
+    }
+
+    /// One pass of the window's logic, run under the stall watch.
+    fn run_logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // A window restored where no monitor shows it any more (a display
+        // unplugged since) comes back onto one.
+        if !std::mem::replace(&mut self.recovery_checked, true) {
+            fastframe_shell::window::recover_offscreen(ctx, frame);
+        }
+        self.read_screen_hz(ctx, frame);
+        let app = &mut *self.app;
+        #[cfg(target_os = "macos")]
+        for command in spotifast::mac_menu::drain_commands() {
+            use spotifast::mac_menu::MenuCommand;
+            use spotifast::model::{Action, Dialog, Page};
+            let action = match command {
+                MenuCommand::PlayPause => Action::TogglePlay,
+                MenuCommand::Next => Action::Next,
+                MenuCommand::Previous => Action::Previous,
+                MenuCommand::SeekForward => Action::SeekBy(10_000),
+                MenuCommand::SeekBackward => Action::SeekBy(-10_000),
+                MenuCommand::ToggleShuffle => Action::ToggleShuffle,
+                MenuCommand::CycleRepeat => Action::CycleRepeat,
+                MenuCommand::VolumeUp => Action::VolumeBy(5),
+                MenuCommand::VolumeDown => Action::VolumeBy(-5),
+                MenuCommand::ToggleMute => Action::ToggleMute,
+                MenuCommand::Home => Action::Open(Page::Home),
+                MenuCommand::Search => Action::FocusSearch,
+                MenuCommand::LikedSongs => Action::Open(Page::LikedSongs),
+                MenuCommand::Sidebar => Action::ToggleSidebar,
+                MenuCommand::Queue => Action::ToggleQueuePanel,
+                MenuCommand::Settings => Action::Open(Page::Settings),
+                MenuCommand::CheckForUpdates => Action::CheckForUpdates,
+                MenuCommand::Shortcuts => Action::ShowDialog(Dialog::Shortcuts),
+                MenuCommand::Back => Action::Back,
+                MenuCommand::Forward => Action::Forward,
+                MenuCommand::OpenRepo => {
+                    ctx.open_url(egui::OpenUrl::new_tab("https://github.com/crmne/spotifast"));
+                    continue;
+                }
+                // Editing goes through egui, which owns the text field
+                // and the clipboard.
+                MenuCommand::Cut => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::RequestCut);
+                    continue;
+                }
+                MenuCommand::Copy => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::RequestCopy);
+                    continue;
+                }
+                MenuCommand::Paste => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+                    continue;
+                }
+                MenuCommand::SelectAll => {
+                    ctx.input_mut(|input| {
+                        input.events.push(egui::Event::Key {
+                            key: egui::Key::A,
+                            physical_key: None,
+                            pressed: true,
+                            repeat: false,
+                            modifiers: egui::Modifiers::COMMAND,
+                        });
+                    });
+                    continue;
+                }
+            };
+            app.actions.push(action);
+        }
+        #[cfg(windows)]
+        for command in self.thumbbar.drain_commands() {
+            if let Some(action) = command.action(&app.thumb_state(false)) {
+                app.actions.push(action);
+            }
+        }
+        app.background_frame(ctx);
+        #[cfg(windows)]
+        self.thumbbar
+            .sync(app.thumb_state(ctx.system_theme() != Some(egui::Theme::Light)));
+        #[cfg(feature = "demo")]
+        self.drive_shot(ctx);
+    }
+
+    fn draw(&mut self, ui: &mut egui::Ui) {
+        let app = &mut *self.app;
+        app.frame_ui(ui);
+        if let Some(receipt) = app.update_receipt.take() {
+            std::thread::spawn(move || {
+                if let Err(error) = receipt.acknowledge() {
+                    log::error!("Could not confirm the update: {error:#}");
+                }
+            });
+        }
+        #[cfg(windows)]
+        self.thumbbar
+            .sync(app.thumb_state(ui.ctx().system_theme() != Some(egui::Theme::Light)));
+    }
 }
 
 /// A scripted pointer for `--demo-drag`: rest on `from`, press there, glide
@@ -1343,97 +1470,16 @@ impl eframe::App for Shell {
     }
 
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        // A window restored where no monitor shows it any more (a display
-        // unplugged since) comes back onto one.
-        if !std::mem::replace(&mut self.recovery_checked, true) {
-            fastframe_shell::window::recover_offscreen(ctx, frame);
-        }
-        let app = &mut *self.app;
-        #[cfg(target_os = "macos")]
-        for command in spotifast::mac_menu::drain_commands() {
-            use spotifast::mac_menu::MenuCommand;
-            use spotifast::model::{Action, Dialog, Page};
-            let action = match command {
-                MenuCommand::PlayPause => Action::TogglePlay,
-                MenuCommand::Next => Action::Next,
-                MenuCommand::Previous => Action::Previous,
-                MenuCommand::SeekForward => Action::SeekBy(10_000),
-                MenuCommand::SeekBackward => Action::SeekBy(-10_000),
-                MenuCommand::ToggleShuffle => Action::ToggleShuffle,
-                MenuCommand::CycleRepeat => Action::CycleRepeat,
-                MenuCommand::VolumeUp => Action::VolumeBy(5),
-                MenuCommand::VolumeDown => Action::VolumeBy(-5),
-                MenuCommand::ToggleMute => Action::ToggleMute,
-                MenuCommand::Home => Action::Open(Page::Home),
-                MenuCommand::Search => Action::FocusSearch,
-                MenuCommand::LikedSongs => Action::Open(Page::LikedSongs),
-                MenuCommand::Sidebar => Action::ToggleSidebar,
-                MenuCommand::Queue => Action::ToggleQueuePanel,
-                MenuCommand::Settings => Action::Open(Page::Settings),
-                MenuCommand::CheckForUpdates => Action::CheckForUpdates,
-                MenuCommand::Shortcuts => Action::ShowDialog(Dialog::Shortcuts),
-                MenuCommand::Back => Action::Back,
-                MenuCommand::Forward => Action::Forward,
-                MenuCommand::OpenRepo => {
-                    ctx.open_url(egui::OpenUrl::new_tab("https://github.com/crmne/spotifast"));
-                    continue;
-                }
-                // Editing goes through egui, which owns the text field
-                // and the clipboard.
-                MenuCommand::Cut => {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::RequestCut);
-                    continue;
-                }
-                MenuCommand::Copy => {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::RequestCopy);
-                    continue;
-                }
-                MenuCommand::Paste => {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaste);
-                    continue;
-                }
-                MenuCommand::SelectAll => {
-                    ctx.input_mut(|input| {
-                        input.events.push(egui::Event::Key {
-                            key: egui::Key::A,
-                            physical_key: None,
-                            pressed: true,
-                            repeat: false,
-                            modifiers: egui::Modifiers::COMMAND,
-                        });
-                    });
-                    continue;
-                }
-            };
-            app.actions.push(action);
-        }
-        #[cfg(windows)]
-        for command in self.thumbbar.drain_commands() {
-            if let Some(action) = command.action(&app.thumb_state(false)) {
-                app.actions.push(action);
-            }
-        }
-        app.background_frame(ctx);
-        #[cfg(windows)]
-        self.thumbbar
-            .sync(app.thumb_state(ctx.system_theme() != Some(egui::Theme::Light)));
-        #[cfg(feature = "demo")]
-        self.drive_shot(ctx);
+        // Taken out for the pass, so the logic can borrow the whole shell.
+        let mut stalls = std::mem::take(&mut self.stalls);
+        stalls.logic(|| self.run_logic(ctx, frame));
+        self.stalls = stalls;
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let app = &mut *self.app;
-        app.frame_ui(ui);
-        if let Some(receipt) = app.update_receipt.take() {
-            std::thread::spawn(move || {
-                if let Err(error) = receipt.acknowledge() {
-                    log::error!("Could not confirm the update: {error:#}");
-                }
-            });
-        }
-        #[cfg(windows)]
-        self.thumbbar
-            .sync(app.thumb_state(ui.ctx().system_theme() != Some(egui::Theme::Light)));
+        let mut stalls = std::mem::take(&mut self.stalls);
+        stalls.ui(|| self.draw(ui));
+        self.stalls = stalls;
     }
 
     /// The mini player's window is see-through where the skin leaves it
@@ -1449,6 +1495,7 @@ impl eframe::App for Shell {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         let app = &mut *self.app;
         app.save_state();
+        app.flush_files();
     }
 }
 

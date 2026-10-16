@@ -2,7 +2,7 @@
 
 ## Versiones fijadas
 
-El manifiesto `eva/release-lock.json` fija Spotifast 0.13.0, commit de fuente, URLs y SHA-256 para Linux x86_64/ARM64 y Windows x86_64/ARM64. Para actualizar, revisar una release oficial nueva, compatibilidad de configuración y sprites; cambiar versión, hashes y snapshot `upstream/` juntos y ejecutar la CI. Los instaladores no eligen `latest` automáticamente.
+El manifiesto `eva/release-lock.json` fija Spotifast 0.13.3, commit de fuente, URLs y SHA-256 para Linux x86_64/ARM64 y Windows x86_64/ARM64. Para actualizar, revisar una release oficial nueva, compatibilidad de configuración y sprites; cambiar versión, hashes y snapshot `upstream/` juntos y ejecutar la CI. Los instaladores no eligen `latest` automáticamente.
 
 ## Linux
 

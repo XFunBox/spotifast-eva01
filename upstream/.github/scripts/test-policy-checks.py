@@ -15,6 +15,7 @@ def load(name):
 
 sources = load("check-dependency-sources")
 evidence = load("check-review-evidence")
+settings = load("check-new-settings")
 
 LOCK = """
 version = 4
@@ -165,6 +166,65 @@ class ReviewEvidenceTest(unittest.TestCase):
         files = asset_files(**{name: b"\0" for name in names})
         files["docs/_guide/glow.md"] = b"![Afterglow](/assets/images/afterglow.png)\n"
         self.assertEqual(evidence.problems(files), [])
+
+
+SETTINGS = """
+pub struct HomeSettings {
+    pub made_for_you: bool,
+}
+
+#[derive(Serialize)]
+#[serde(default)]
+pub struct Settings {
+    /// The name: other devices see it.
+    pub device_name: String,
+    #[serde(
+        default,
+        deserialize_with = "fastframe_theme::read_cached_theme",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub theme_cache: Option<
+        crate::theme::CustomTheme,
+    >,
+    pub home: HomeSettings,{extra}
+}
+
+pub struct SessionState {
+    pub queue: Vec<String>,
+}
+"""
+
+
+def settings_source(extra):
+    return SETTINGS.replace("{extra}", extra)
+
+
+class NewSettingsTest(unittest.TestCase):
+    def test_the_fields_of_each_settings_struct_are_found(self):
+        self.assertEqual(
+            settings.fields(settings_source("")),
+            {"HomeSettings": {"made_for_you"}, "Settings": {"device_name", "theme_cache", "home"}},
+        )
+
+    def test_an_unchanged_or_smaller_settings_struct_passes(self):
+        base = settings_source("\n    pub gapless: bool,")
+        self.assertEqual(settings.added(base, base), [])
+        self.assertEqual(settings.added(base, settings_source("")), [])
+
+    def test_a_new_field_is_found_with_its_struct(self):
+        head = settings_source("\n    /// F toggles: lyrics.\n    #[serde(default)]\n    pub fullscreen_key: bool,")
+        self.assertEqual(settings.added(settings_source(""), head), [("Settings", "fullscreen_key")])
+
+    def test_a_field_in_a_nested_settings_struct_counts(self):
+        head = settings_source("").replace(
+            "pub made_for_you: bool,", "pub made_for_you: bool,\n    pub(crate) radio: bool,"
+        )
+        self.assertEqual(settings.added(settings_source(""), head), [("HomeSettings", "radio")])
+
+    def test_a_renamed_field_counts_and_session_state_does_not(self):
+        base = settings_source("")
+        head = base.replace("pub device_name:", "pub connect_name:").replace("pub queue:", "pub history:")
+        self.assertEqual(settings.added(base, head), [("Settings", "connect_name")])
 
 
 if __name__ == "__main__":

@@ -7,6 +7,8 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::api::models::{Album, Image, PlayHistory, Track};
 
@@ -34,6 +36,8 @@ pub struct History {
     plays: Vec<PlayHistory>,
     /// Set when the in-memory list differs from the file.
     dirty: bool,
+    /// Set by the file writer when a handed-over write failed.
+    failed: Arc<AtomicBool>,
 }
 
 impl History {
@@ -45,7 +49,7 @@ impl History {
             .unwrap_or_default();
         Self {
             plays,
-            dirty: false,
+            ..Self::default()
         }
     }
 
@@ -57,27 +61,36 @@ impl History {
         self.plays.is_empty()
     }
 
-    /// Writes the history if it changed since the last save. A write that
-    /// fails leaves it to be written by the next save.
-    pub fn save(&mut self, path: &Path) {
-        if !self.dirty {
+    /// Whether the file may not hold the plays in memory.
+    pub fn needs_save(&self) -> bool {
+        self.dirty || self.failed.load(Ordering::SeqCst)
+    }
+
+    /// Hands the history to `files` if it changed since the last save. A
+    /// write that fails leaves it to be written by the next save.
+    pub fn save(&mut self, files: &fastframe_file::Writer, path: &Path) {
+        let failed = self.failed.swap(false, Ordering::SeqCst);
+        if !std::mem::take(&mut self.dirty) && !failed {
             return;
         }
         match serde_json::to_string(&self.plays) {
             Ok(text) => {
                 // Replaced whole, as settings are: the history is written
                 // when the session ends, and a shutdown that cuts the write
-                // short must not leave half a file behind. The new file and
-                // its move reach the disk before the save counts, so a power
-                // cut right after cannot leave an empty history in its place.
+                // short must not leave half a file behind. The writer waits
+                // until the new file and its move reach the disk, off the UI
+                // thread, so a power cut cannot leave an empty history.
                 // What someone listened to is theirs: on Unix the file is
                 // readable by its owner only, whatever the old one allowed.
-                match fastframe_file::write_private(path, text) {
-                    Ok(()) => self.dirty = false,
-                    Err(error) => log::warn!("could not write the play history: {error}"),
-                }
+                let failed = self.failed.clone();
+                files.write_or(path, text, fastframe_file::Access::Private, move || {
+                    failed.store(true, Ordering::SeqCst)
+                });
             }
-            Err(error) => log::warn!("could not write the play history: {error}"),
+            Err(error) => {
+                self.dirty = true;
+                log::warn!("could not write the play history: {error}");
+            }
         }
     }
 
@@ -188,6 +201,8 @@ pub fn merged(local: &[PlayHistory], remote: &[PlayHistory]) -> Vec<PlayHistory>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fastframe_file::Writer;
+    use std::time::Duration;
 
     fn play(uri: &str, at: &str) -> PlayHistory {
         PlayHistory {
@@ -327,6 +342,7 @@ mod tests {
             std::env::temp_dir().join(format!("spotifast-history-{:016x}", rand::random::<u64>()));
         let path = dir.join("history.json");
         let at: jiff::Timestamp = "2026-09-01T09:00:00Z".parse().unwrap();
+        let files = Writer::new();
         let mut history = History::default();
         for uri in ["spotify:track:a", "spotify:track:b"] {
             history.record(
@@ -336,8 +352,9 @@ mod tests {
                 },
                 at,
             );
-            history.save(&path);
+            history.save(&files, &path);
         }
+        assert!(files.flush(Duration::from_secs(10)));
         let read = History::load(&path);
         let uris: Vec<_> = read
             .plays()
@@ -368,12 +385,15 @@ mod tests {
             },
             "2026-09-01T09:00:00Z".parse().unwrap(),
         );
-        history.save(&blocked.join("history.json"));
-        assert!(history.dirty, "the failed write is still to be done");
+        let files = Writer::new();
+        history.save(&files, &blocked.join("history.json"));
+        assert!(files.flush(Duration::from_secs(10)));
+        assert!(history.needs_save(), "the failed write is still to be done");
 
         let path = dir.join("history.json");
-        history.save(&path);
-        assert!(!history.dirty);
+        history.save(&files, &path);
+        assert!(files.flush(Duration::from_secs(10)));
+        assert!(!history.needs_save());
         assert_eq!(History::load(&path).plays().len(), 1);
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -398,7 +418,9 @@ mod tests {
             },
             "2026-09-01T09:00:00Z".parse().unwrap(),
         );
-        history.save(&path);
+        let files = Writer::new();
+        history.save(&files, &path);
+        assert!(files.flush(Duration::from_secs(10)));
         let mode = std::fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
         std::fs::remove_dir_all(dir).unwrap();

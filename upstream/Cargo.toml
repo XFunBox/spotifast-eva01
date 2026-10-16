@@ -1,7 +1,7 @@
 [package]
 name = "spotifast"
 default-run = "spotifast"
-version = "0.13.0"
+version = "0.13.3"
 edition = "2024"
 rust-version = "1.98"
 license = "MIT"
@@ -38,52 +38,54 @@ egui_extras = { version = "0.36", features = ["image", "svg"] }
 # The shared foundation of Spotifast, ZapFast, RekordFlash and TonePush
 # (crmne/fastframe). Every crate comes from the same revision; move them
 # together.
-fastframe-text = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1" }
-fastframe-fonts = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1" }
-fastframe-icons = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1" }
-fastframe-theme = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1" }
+fastframe-text = { git = "https://github.com/crmne/fastframe", tag = "v0.6.0" }
+fastframe-fonts = { git = "https://github.com/crmne/fastframe", tag = "v0.6.0" }
+fastframe-icons = { git = "https://github.com/crmne/fastframe", tag = "v0.6.0" }
+fastframe-theme = { git = "https://github.com/crmne/fastframe", tag = "v0.6.0" }
 # Colour emoji in the platform's own style (Apple Color Emoji, Segoe UI
 # Emoji, the desktop's colour emoji font), in every text through its egui
 # plugin.
-fastframe-emoji = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1" }
+fastframe-emoji = { git = "https://github.com/crmne/fastframe", tag = "v0.6.0" }
 # Catalogs compiled from PO files at build time (see build.rs) and the
 # system's preferred languages. No libintl or runtime catalog parsing.
-fastframe-i18n = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1" }
+fastframe-i18n = { git = "https://github.com/crmne/fastframe", tag = "v0.6.0" }
 # The log file for bug reports and the panic log (env_logger underneath).
-fastframe-log = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1" }
+fastframe-log = { git = "https://github.com/crmne/fastframe", tag = "v0.6.0" }
 # The tray item, so closing the window can keep the music playing:
 # StatusNotifier on Linux, the notification area on Windows, the menu bar
 # on macOS.
-fastframe-tray = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1" }
+fastframe-tray = { git = "https://github.com/crmne/fastframe", tag = "v0.6.0" }
 # Keeps the app running without a window around eframe::run_native.
-fastframe-shell = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1" }
-# The macOS title-bar double-click setting (does nothing elsewhere).
-fastframe-macos = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1" }
+fastframe-shell = { git = "https://github.com/crmne/fastframe", tag = "v0.6.0" }
+# The title bar the app draws itself: the header drag and double-click on
+# every platform, and on Windows and Linux the caption buttons and resizable
+# edges when the listener turns the platform's frame off.
+fastframe-titlebar = { git = "https://github.com/crmne/fastframe", tag = "v0.6.0" }
 # Self-update from GitHub releases, on the reqwest client below.
-fastframe-update = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1", features = ["reqwest"] }
+fastframe-update = { git = "https://github.com/crmne/fastframe", tag = "v0.6.0", features = ["reqwest"] }
 # Settings, the session, the history, caches and the credential markers
 # are replaced whole: a temporary file beside each, synced to the disk, then
 # moved over it (written through on Windows), so a crash never leaves half.
-fastframe-file = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1" }
+fastframe-file = { git = "https://github.com/crmne/fastframe", tag = "v0.6.0" }
 # The device's power, session and network state: energy saver, battery,
 # display, lock, the internet's reach and cost, sleep and wake, and the App
 # Nap activity local playback holds on macOS.
-fastframe-power = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1" }
+fastframe-power = { git = "https://github.com/crmne/fastframe", tag = "v0.6.0" }
 # The audio device stream: it pauses, so a paused player costs no CPU (#636),
 # follows the default output and reopens after a failure. Its cpal 0.18
 # cannot share a build with the cpal 0.16 of librespot's rodio backend (both
 # link ALSA), so that backend is left out.
-fastframe-audio = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1" }
+fastframe-audio = { git = "https://github.com/crmne/fastframe", tag = "v0.6.0" }
 # The wheel step, the Linux touchpad scale and glide, and the axis a scroll
 # gesture holds.
-fastframe-scroll = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1" }
+fastframe-scroll = { git = "https://github.com/crmne/fastframe", tag = "v0.6.0" }
 # One running copy per user: a lock and a private channel that a second
 # launch and the command line hand their requests to.
-fastframe-instance = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1" }
+fastframe-instance = { git = "https://github.com/crmne/fastframe", tag = "v0.6.0" }
 # The desktop's media controls: MPRIS on Linux, the media overlay on
 # Windows, Now Playing on macOS. The media keys and those panels send
 # commands back, and closing the window keeps the music playing.
-fastframe-now-playing = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1" }
+fastframe-now-playing = { git = "https://github.com/crmne/fastframe", tag = "v0.6.0" }
 # Reading installed fonts for MilkDrop's overlays, the Winamp playlist's
 # pixel text, and the playlist face. skrifa is the parser epaint already
 # rasterizes with, and the version has to track epaint's or the binary
@@ -156,6 +158,12 @@ md-5 = "0.10"
 # Cast v2 runs over TLS with a certificate from Google's device CA, which
 # needs a custom verifier (`cast.rs`). Already in the tree through reqwest.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+# The device then proves it is genuine with a certificate chain to Google's
+# Cast roots (`cast.rs`). ring adds the SHA-1 signatures older devices still
+# use, which rustls-webpki leaves out. Both are already in the tree through
+# rustls.
+rustls-webpki = { version = "0.103", default-features = false, features = ["ring", "std"] }
+ring = "0.17"
 base64 = "0.22"
 # Native asynchronous file selection on macOS, Windows and Linux desktop portals.
 rfd = "0.17.2"
@@ -182,7 +190,8 @@ objc2 = { version = "0.6", features = ["exception"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAccessibility", "NSApplication", "NSEvent", "NSMenu", "NSMenuItem", "NSResponder", "NSRunningApplication", "NSWindow", "NSView", "NSScreen", "NSColor", "NSImage", "NSImageView", "NSButton", "NSControl", "NSTrackingArea", "NSVisualEffectView", "NSTextField", "NSBezierPath", "NSFont", "NSAnimation", "NSAnimationContext", "NSWorkspace"] }
 # NSAppleEventManager and NSAppleEventDescriptor carry the Spotify links
 # macOS hands an app registered for the scheme (src/mac_links.rs), and
-# NSRunLoop has the delayed perform the title bar uses (src/window.rs).
+# NSRunLoop has the delayed perform that minimizes the window
+# (src/window.rs).
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSAppleEventDescriptor", "NSAppleEventManager", "NSDate", "NSObjCRuntime", "NSRunLoop", "NSString", "NSThread", "NSDictionary", "NSAttributedString", "NSData"] }
 
 [target.'cfg(windows)'.dependencies]
@@ -198,10 +207,6 @@ librespot-playback = { version = "0.8", default-features = false, features = ["p
 # (src/appearance.rs). fastframe-now-playing's MPRIS already compiles this
 # version.
 zbus = { version = "5", default-features = false, features = ["tokio"] }
-# Whether the session is GNOME, and its window button layout and icon theme
-# read through the desktop portal (src/window.rs), which works inside a
-# Flatpak, where running gsettings does not.
-fastframe-desktop = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1" }
 # Keeps the X11 mini player out of the taskbar with _NET_WM_STATE_SKIP_TASKBAR
 # (src/window.rs), which winit only offers on Windows. winit already
 # compiles this version.
@@ -210,7 +215,7 @@ x11rb = { version = "0.13", default-features = false }
 [build-dependencies]
 # Drops unfinished PO entries and compiles catalog text and gettext plural
 # expressions to Rust. Ordinary builds do not need gettext tools.
-fastframe-i18n = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1", features = ["build"] }
+fastframe-i18n = { git = "https://github.com/crmne/fastframe", tag = "v0.6.0", features = ["build"] }
 
 [dev-dependencies]
 # Checks that every catalog covers the template and keeps its placeholders.
@@ -289,8 +294,10 @@ winit = { git = "https://github.com/crmne/winit", rev = "ed7caa9023f10b397f5b6ec
 # projectm-sys 1.2.2 hardcodes the Visual Studio 17 2022 CMake generator,
 # which GitHub's windows-latest images no longer carry; the fork lets an
 # explicit CMAKE_GENERATOR win, and asks vcpkg for the target's architecture
-# so libprojectM links for Windows on ARM. Drop when upstream takes the change.
-projectm-sys = { git = "https://github.com/crmne/projectm-rs", rev = "1ef6df1c20247a3a5800c625e46262330f93bbd6" }
+# so libprojectM links for Windows on ARM. Its libprojectM comes from
+# crmne/projectm's spotifast branch, which adds a length check on HLSL
+# identifiers. Drop each when upstream releases it.
+projectm-sys = { git = "https://github.com/crmne/projectm-rs", rev = "93852ff7299e5a63ed1315437593fc70915c0863" }
 # hyper-proxy2's unreleased rustls 0.23 update plus our upstream provider
 # compatibility fix. Drop this fork when a release includes both changes.
 hyper-proxy2 = { git = "https://github.com/crmne/hyper-proxy2", rev = "efca4811371ddae81c06be168de54194938d70b1" }
@@ -302,13 +309,16 @@ hyper-proxy2 = { git = "https://github.com/crmne/hyper-proxy2", rev = "efca48113
 # inside the access-point timeout (#1800), ranged playlist reads (#1801), an
 # in-memory credential cache for platform storage (#1802), bounded socket
 # setup that races IPv6 and IPv4 (#1803), playback recovery after a session
-# disconnect (#1765), and a volume set while the device is inactive (#1770).
+# disconnect (#1765), a volume set while the device is inactive (#1770),
+# the dealer connection through the configured proxy (#1665), tokens and
+# credentials kept out of Debug output (#1806), and a bounded handshake
+# packet size (#1807).
 # Every librespot crate comes from the fork so one copy exists. Drop each
 # patch once upstream merges it.
-librespot-audio = { git = "https://github.com/crmne/librespot", rev = "4118319a671f13cb3d85c7a870048216e75ee86e" }
-librespot-connect = { git = "https://github.com/crmne/librespot", rev = "4118319a671f13cb3d85c7a870048216e75ee86e" }
-librespot-core = { git = "https://github.com/crmne/librespot", rev = "4118319a671f13cb3d85c7a870048216e75ee86e" }
-librespot-metadata = { git = "https://github.com/crmne/librespot", rev = "4118319a671f13cb3d85c7a870048216e75ee86e" }
-librespot-oauth = { git = "https://github.com/crmne/librespot", rev = "4118319a671f13cb3d85c7a870048216e75ee86e" }
-librespot-playback = { git = "https://github.com/crmne/librespot", rev = "4118319a671f13cb3d85c7a870048216e75ee86e" }
-librespot-protocol = { git = "https://github.com/crmne/librespot", rev = "4118319a671f13cb3d85c7a870048216e75ee86e" }
+librespot-audio = { git = "https://github.com/crmne/librespot", rev = "847125198bb251d1d4497f46bebbfa4868b7d5d7" }
+librespot-connect = { git = "https://github.com/crmne/librespot", rev = "847125198bb251d1d4497f46bebbfa4868b7d5d7" }
+librespot-core = { git = "https://github.com/crmne/librespot", rev = "847125198bb251d1d4497f46bebbfa4868b7d5d7" }
+librespot-metadata = { git = "https://github.com/crmne/librespot", rev = "847125198bb251d1d4497f46bebbfa4868b7d5d7" }
+librespot-oauth = { git = "https://github.com/crmne/librespot", rev = "847125198bb251d1d4497f46bebbfa4868b7d5d7" }
+librespot-playback = { git = "https://github.com/crmne/librespot", rev = "847125198bb251d1d4497f46bebbfa4868b7d5d7" }
+librespot-protocol = { git = "https://github.com/crmne/librespot", rev = "847125198bb251d1d4497f46bebbfa4868b7d5d7" }

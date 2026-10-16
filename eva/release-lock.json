@@ -1,27 +1,27 @@
 {
-  "version": "0.13.0",
-  "source_commit": "36964f19e2fb1154d5e87973d76928c7ddbeaf06",
+  "version": "0.13.3",
+  "source_commit": "a4c1b3ef6c9667507f198312453766f6ba953710",
   "source_url": "https://github.com/crmne/spotifast",
   "downloads": {
     "linux-x86_64": {
-      "filename": "spotifast-0.13.0-x86_64.AppImage",
-      "url": "https://github.com/crmne/spotifast/releases/download/v0.13.0/spotifast-0.13.0-x86_64.AppImage",
-      "sha256": "d6d706835987c7b6e13d8e00b16e4fca72536096b3ce9dc9681f3163dd9a6bf1"
+      "filename": "spotifast-0.13.3-x86_64.AppImage",
+      "url": "https://github.com/crmne/spotifast/releases/download/v0.13.3/spotifast-0.13.3-x86_64.AppImage",
+      "sha256": "aa1795ce959e78099c9e3e303231a5af19d20fed8c66b5df0b989786dd2fd90f"
     },
     "linux-aarch64": {
-      "filename": "spotifast-0.13.0-aarch64.AppImage",
-      "url": "https://github.com/crmne/spotifast/releases/download/v0.13.0/spotifast-0.13.0-aarch64.AppImage",
-      "sha256": "9109e7e6b67eeed806066a339b6c473e793f9c69add8b4e4f6b1c00d9d34a6c9"
+      "filename": "spotifast-0.13.3-aarch64.AppImage",
+      "url": "https://github.com/crmne/spotifast/releases/download/v0.13.3/spotifast-0.13.3-aarch64.AppImage",
+      "sha256": "92066a9d0a370c007dd17a17999d44eb00e72a455f771036a219e6d29b335154"
     },
     "windows-x86_64": {
-      "filename": "spotifast-v0.13.0-x86_64-pc-windows-msvc.zip",
-      "url": "https://github.com/crmne/spotifast/releases/download/v0.13.0/spotifast-v0.13.0-x86_64-pc-windows-msvc.zip",
-      "sha256": "28a30d64dbd6b7e646c97bf49193a62aa488dacd6458ef6269d36a8537ca0977"
+      "filename": "spotifast-v0.13.3-x86_64-pc-windows-msvc.zip",
+      "url": "https://github.com/crmne/spotifast/releases/download/v0.13.3/spotifast-v0.13.3-x86_64-pc-windows-msvc.zip",
+      "sha256": "a71f7e157fd845836feb964f627c2f7069fa75a0366cede55f37eb211e4bf9b8"
     },
     "windows-aarch64": {
-      "filename": "spotifast-v0.13.0-aarch64-pc-windows-msvc.zip",
-      "url": "https://github.com/crmne/spotifast/releases/download/v0.13.0/spotifast-v0.13.0-aarch64-pc-windows-msvc.zip",
-      "sha256": "b69c5130097cfa9bd938cde1cb7eda644a61cea8b89126843f495932848ccccd"
+      "filename": "spotifast-v0.13.3-aarch64-pc-windows-msvc.zip",
+      "url": "https://github.com/crmne/spotifast/releases/download/v0.13.3/spotifast-v0.13.3-aarch64-pc-windows-msvc.zip",
+      "sha256": "f77cafcd8faf545c065181c2d5b1bad406ff76342859b881ecbd44fc4d8bfe4a"
     }
   }
 }

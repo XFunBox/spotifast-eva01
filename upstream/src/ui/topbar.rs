@@ -211,8 +211,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     // its empty parts drag the window.
     let inset = theme::titlebar_inset(ui.ctx());
     let content_height = theme::top_bar_height() + inset;
-    if crate::window::custom_titlebar() {
-        super::titlebar_drag(
+    if fastframe_titlebar::enabled() {
+        fastframe_titlebar::drag(
             ui,
             egui::Rect::from_min_size(
                 ui.cursor().min,
@@ -222,7 +222,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     }
     // Balance the visible Windows header, including the gap below the
     // control row.
-    let top_padding = if cfg!(windows) && crate::window::custom_titlebar() {
+    let top_padding = if cfg!(windows) && fastframe_titlebar::enabled() {
         4.0
     } else {
         0.0

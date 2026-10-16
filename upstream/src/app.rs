@@ -44,6 +44,11 @@ const REMOTE_POLL_UNSEEN: Duration = Duration::from_secs(30);
 const REMOTE_FRESH: Duration = Duration::from_secs(60);
 const DEVICES_FRESH: Duration = Duration::from_secs(12);
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(280);
+/// How long a suspend or the end of the session waits for pending file
+/// writes. fastframe-power holds the system back for 1.5 s before a
+/// suspend (3 s at the end of a session), so a longer wait would only
+/// answer after the system has gone ahead without us.
+const SUSPEND_FLUSH_TIMEOUT: Duration = Duration::from_millis(1500);
 /// How old the saved resume point may grow while music plays.
 const SESSION_REFRESH: Duration = Duration::from_secs(30);
 /// The longest the app sleeps in the tray with nothing due.
@@ -54,6 +59,8 @@ const PLAYLISTS_RETRY: Duration = Duration::from_secs(60);
 /// How long background work goes on before the top bar's spinner shows it,
 /// so fast answers never flash it.
 const BACKGROUND_QUIET: Duration = Duration::from_secs(1);
+/// How often coming back to the window reads the playlist tree again.
+const ROOTLIST_REFRESH: Duration = Duration::from_secs(5);
 /// How far into a song Previous restarts it rather than stepping back,
 /// matching what librespot does during playback.
 const RESTART_BEFORE_PREVIOUS: u32 = 3_000;
@@ -293,6 +300,10 @@ pub struct App {
     /// What the app may spend on drawing and polling, from the power state
     /// and the window's; worked out in each logic pass.
     pub budget: crate::power::Budget,
+    /// How often the monitor showing the main window refreshes, in hertz,
+    /// once it has said; 0 before. Not saved: the window may open on
+    /// another screen next time.
+    pub screen_hz: u32,
     /// Whether the desktop asks for less motion.
     pub motion: crate::motion::Motion,
     pub window_hidden: bool,
@@ -405,6 +416,8 @@ pub struct App {
     pub home: HomeData,
     /// Local play history. See [`crate::history`].
     pub plays: crate::history::History,
+    /// Writes settings, session and history off the UI thread.
+    files: fastframe_file::Writer,
     /// Current track timing used to decide when a play counts.
     listening: Option<Listening>,
     pub recents: crate::model::CursorList<crate::api::models::PlayHistory>,
@@ -614,6 +627,13 @@ pub struct App {
     /// A session connected and its account's cache is still to be read,
     /// once `Me` says which account it is.
     account_caches_due: bool,
+    /// When the tree was last asked for.
+    rootlist_read_at: Option<Instant>,
+    /// Whether the window had focus last frame.
+    window_focused: bool,
+    /// Coming back to the window asked for the tree, and it has not been
+    /// read since.
+    rootlist_wanted: bool,
     /// Playlists the account may add songs to by Spotify's own word, by
     /// URI: the ones shared with it by invitation, which the Web API's
     /// collaborative flag does not show. Empty until the session answers.
@@ -869,6 +889,7 @@ impl App {
             reachable: true,
             playback_activity: None,
             budget: crate::power::Budget::default(),
+            screen_hz: 0,
             motion: crate::motion::Motion::default(),
             window_hidden: false,
             hide_intent: false,
@@ -936,6 +957,7 @@ impl App {
             liked_recheck_at: None,
             home: HomeData::default(),
             plays,
+            files: fastframe_file::Writer::new(),
             listening: None,
             recents: crate::model::CursorList::default(),
             recents_view: Vec::new(),
@@ -1061,6 +1083,9 @@ impl App {
             rootlist_cache: session.rootlist.clone(),
             account_caches_generation: 0,
             account_caches_due: false,
+            rootlist_read_at: None,
+            window_focused: true,
+            rootlist_wanted: false,
             editable_by_grant: std::collections::BTreeSet::new(),
             pending_link: None,
             prerelease_request: None,
@@ -1160,6 +1185,8 @@ impl App {
         self.window_hidden = true;
         self.hide_intent = false;
         self.wants_show = false;
+        // Showing it again is coming back to it.
+        self.window_focused = false;
     }
 
     /// Whether closing the window keeps the app in the tray rather than
@@ -2313,9 +2340,15 @@ impl App {
                     gettext(self.locale, "Local playback: {error}").replace("{error}", message),
                 );
             }
-            LocalPlayback::Authorizing
-            | LocalPlayback::Connecting
-            | LocalPlayback::WaitingForNetwork => {}
+            LocalPlayback::Authorizing => {
+                if !matches!(self.local_playback, LocalPlayback::Authorizing) {
+                    self.toast(gettext(
+                        self.locale,
+                        "Opening your browser to set up local playback",
+                    ));
+                }
+            }
+            LocalPlayback::Connecting | LocalPlayback::WaitingForNetwork => {}
         }
         self.local_playback = status;
     }
@@ -3107,6 +3140,17 @@ impl App {
 
     fn tick(&mut self, ctx: &egui::Context) {
         self.poll_custom_themes(ctx);
+        if let Some(wait) = self.window_focus(ctx.input(|input| {
+            // A minimised window is away even where it keeps focus.
+            let viewport = input.viewport();
+            if viewport.minimized == Some(true) {
+                Some(false)
+            } else {
+                viewport.focused
+            }
+        })) {
+            ctx.request_repaint_after(wait);
+        }
         let now = Instant::now();
         if self.winamp_level_reassert > 0 {
             self.winamp_level_reassert -= 1;
@@ -3372,11 +3416,33 @@ impl App {
         }
     }
 
+    /// How many frames a second the player bar's and mini player's
+    /// visualizers draw now, from the user's rate and the power budget;
+    /// `None` draws none.
+    pub fn visualiser_fps(&self) -> Option<u32> {
+        crate::power::visualiser_fps(
+            self.budget,
+            self.power.conditions(),
+            self.settings.visualizer_fps,
+        )
+    }
+
+    /// The screen rate the visualizers' frame-rate dial offers: the one
+    /// showing the main window, or the one MilkDrop last saw until that
+    /// has said; 0 while neither is known.
+    pub fn visualiser_screen_hz(&self) -> u32 {
+        match self.screen_hz {
+            0 => self.settings.milkdrop_screen_hz,
+            hz => hz,
+        }
+    }
+
     /// Records the MilkDrop screen refresh rate and uses it as the initial FPS.
-    /// Later screen changes do not override a configured FPS.
+    /// Later screen changes do not override a configured FPS, and an answer
+    /// that is no rate, such as Windows's "hardware default", is ignored.
     #[cfg(feature = "milkdrop")]
     fn learn_screen_hz(&mut self, hz: u32) {
-        if hz == 0 || self.settings.milkdrop_screen_hz == hz {
+        if !crate::milkdrop::is_screen_rate(hz) || self.settings.milkdrop_screen_hz == hz {
             return;
         }
         let first = self.settings.milkdrop_screen_hz == 0
@@ -3559,7 +3625,13 @@ impl App {
         }
         let mut saved = self.settings.clone();
         self.applied_proxy_preferences.apply_to(&mut saved);
-        saved.save(&self.dirs.settings_file());
+        if let Some(text) = saved.encode() {
+            self.files.write(
+                &self.dirs.settings_file(),
+                text,
+                fastframe_file::Access::Default,
+            );
+        }
     }
 
     /// Called at launch or by the local reload command. Construction and window
@@ -4028,6 +4100,51 @@ impl App {
     }
 
     // ---- loading ---------------------------------------------------------------
+
+    fn read_rootlist(&mut self) {
+        self.rootlist_wanted = false;
+        self.rootlist_read_at = Some(Instant::now());
+        self.backend.send(Command::Rootlist);
+    }
+
+    /// Spotify's own apps can reorder playlists and folders while Spotifast
+    /// waits behind them, so coming back reads the tree again. The read
+    /// goes over the playback session and spends no Web API quota. A return
+    /// soon after the last read waits out the rest of `ROOTLIST_REFRESH`,
+    /// and the time left is returned so the caller can wake up for it.
+    ///
+    /// `focused` is `None` on a frame that does not say, such as one run
+    /// without a window; that frame neither leaves nor comes back.
+    fn window_focus(&mut self, focused: Option<bool>) -> Option<Duration> {
+        // Frames without a window have no focus to report.
+        if self.window_hidden {
+            return None;
+        }
+        if let Some(focused) = focused {
+            if focused && !self.window_focused {
+                self.rootlist_wanted = true;
+            }
+            self.window_focused = focused;
+        }
+        // Until every playlist has arrived, the first read is still to come.
+        if !self.rootlist_wanted
+            || !self.is_connected()
+            || !matches!(self.library.playlists, Loadable::Loaded(_))
+            || self.library.playlists_next.is_some()
+            || self.library.playlists_asked.is_some()
+            || self.library.playlists_loading_since.is_some()
+        {
+            return None;
+        }
+        let wait = self.rootlist_read_at.map_or(Duration::ZERO, |at| {
+            ROOTLIST_REFRESH.saturating_sub(at.elapsed())
+        });
+        if wait.is_zero() {
+            self.read_rootlist();
+            return None;
+        }
+        Some(wait)
+    }
 
     /// Reads the playlists from the top. A list already shown stays until
     /// the new one is whole. A load already on its way is replaced, not
@@ -6097,7 +6214,7 @@ impl App {
                             .playlists_edits
                             .retain(|edit| edit.settled_by.is_none_or(|by| by > generation));
                         // Load folder order after all playlists arrive.
-                        self.backend.send(Command::Rootlist);
+                        self.read_rootlist();
                     }
                     if shown || next_offset.is_none() {
                         self.apply_playlist_edits();
@@ -10343,11 +10460,9 @@ impl App {
                 {
                     self.settings.playback_authorized = true;
                     self.settings_dirty = true;
+                    // The backend tries a saved grant first; the browser
+                    // toast follows `LocalPlayback::Authorizing` (#818).
                     self.backend.send(Command::AuthorizePlayback);
-                    self.toast(gettext(
-                        self.locale,
-                        "Opening your browser to set up local playback",
-                    ));
                 }
             }
             Action::SetPrereleaseSaved { uri, saved } => {
@@ -10382,7 +10497,7 @@ impl App {
             }
             Action::ClearPlayHistory => {
                 self.plays.clear();
-                self.plays.save(&self.dirs.history_file());
+                self.plays.save(&self.files, &self.dirs.history_file());
                 self.rebuild_recents();
                 self.toast(gettext(self.locale, "Play history cleared"));
             }
@@ -10455,7 +10570,7 @@ impl App {
             Action::SetCustomTitlebar(custom) => {
                 if self.settings.custom_titlebar != custom {
                     self.settings.custom_titlebar = custom;
-                    crate::window::set_custom_titlebar(custom);
+                    fastframe_titlebar::set_enabled(custom);
                     self.mark_settings_dirty();
                     if !self.settings.winamp_window {
                         // Decorations are fixed at creation. Replace only the
@@ -10567,9 +10682,8 @@ impl App {
                     // which hardly answers the music; fetch the packs in the
                     // background and the window fills up on its own.
                     let folder = self.dirs.milkdrop_dir();
-                    self.winamp.presets.refresh(&folder);
-                    if self.winamp.presets.count() == 0
-                        && self.winamp.presets.downloading().is_none()
+                    if self.winamp.presets.downloading().is_none()
+                        && !crate::milkdrop::has_presets(&folder)
                     {
                         self.winamp.presets.download_missing(
                             folder,
@@ -10997,7 +11111,11 @@ impl App {
             match event {
                 Event::Suspending(ack) | Event::EndingSession(ack) => {
                     self.save_state();
-                    self.plays.save(&self.dirs.history_file());
+                    self.plays.save(&self.files, &self.dirs.history_file());
+                    // The system may stop for good after this: the writes
+                    // reach the disk before it is told to go ahead, within
+                    // the time the system is held for.
+                    self.files.flush(SUSPEND_FLUSH_TIMEOUT);
                     ack.done();
                 }
                 Event::Resumed => {}
@@ -11095,7 +11213,7 @@ impl App {
         listening.recorded = true;
         self.plays
             .record(crate::history::played_track(&now), jiff::Timestamp::now());
-        self.plays.save(&self.dirs.history_file());
+        self.plays.save(&self.files, &self.dirs.history_file());
         self.rebuild_recents();
     }
 
@@ -11334,7 +11452,7 @@ impl App {
             self.resume_position_ms = now.position_ms;
         }
         if !self.offline {
-            SessionState {
+            let session = SessionState {
                 last_page: Some(self.page().encode()),
                 recent_contexts: self.recent_contexts.clone(),
                 last_context: self.resume_context.clone(),
@@ -11372,14 +11490,27 @@ impl App {
                         maximized: self.lyrics_restore_maximized,
                     }
                 }),
+            };
+            if let Some(text) = session.encode() {
+                self.files.write(
+                    &self.dirs.session_file(),
+                    text,
+                    fastframe_file::Access::Default,
+                );
             }
-            .save(&self.dirs.session_file());
         }
+    }
+
+    /// Waits, for a bounded time, until every handed-over file write is on
+    /// the disk. Exit calls it; nothing else should. A timeout is logged.
+    pub fn flush_files(&self) -> bool {
+        self.files.flush(fastframe_file::FLUSH_TIMEOUT)
     }
 
     /// Final teardown at real quit.
     pub fn shutdown(&mut self) {
         self.save_state();
+        self.flush_files();
         self.backend.shutdown();
     }
 }
@@ -12749,7 +12880,7 @@ mod tests {
         assert!(app.settings.custom_titlebar);
         assert!(app.switch_intent, "the main window is replaced");
         assert_eq!(
-            crate::window::custom_titlebar(),
+            fastframe_titlebar::enabled(),
             cfg!(any(windows, target_os = "linux"))
         );
 
@@ -12761,7 +12892,7 @@ mod tests {
         app.apply(Action::SetCustomTitlebar(false), &ctx);
         assert!(!app.settings.custom_titlebar);
         assert!(!app.switch_intent, "the mini player is not the main window");
-        assert!(!crate::window::custom_titlebar());
+        assert!(!fastframe_titlebar::enabled());
     }
 
     #[test]
@@ -14346,6 +14477,55 @@ mod tests {
         }
     }
 
+    /// A save that waits for the disk on the UI thread fails debug builds
+    /// and tests, so one that would freeze the window cannot come back
+    /// unnoticed. (A release build logs it and still writes.)
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "UI thread")]
+    fn a_save_that_waits_for_the_disk_is_refused_on_the_ui_thread() {
+        let dir = std::env::temp_dir().join(format!(
+            "spotifast-ui-thread-save-{:016x}",
+            rand::random::<u64>()
+        ));
+        fastframe_file::mark_ui_thread();
+        Settings::default().save(&dir.join("settings.json"));
+    }
+
+    /// Settings, session and history saved on the UI thread are handed to
+    /// the file writer: the thread never waits for the disk (which panics
+    /// in tests), and everything is on the disk after a flush.
+    #[test]
+    fn saving_from_the_ui_thread_never_waits_for_the_disk() {
+        let mut app = test_app("saves-off-the-ui-thread");
+        fastframe_file::mark_ui_thread();
+        app.settings.theme = ThemeChoice::Light;
+        app.plays.record(
+            crate::api::models::Track {
+                uri: "spotify:track:a".into(),
+                ..Default::default()
+            },
+            jiff::Timestamp::now(),
+        );
+        app.save_state();
+        app.flush_files();
+        app.plays.save(&app.files, &app.dirs.history_file());
+        assert!(app.flush_files());
+        assert_eq!(
+            Settings::load(&app.dirs.settings_file()).theme,
+            ThemeChoice::Light
+        );
+        assert!(app.dirs.session_file().exists());
+        assert_eq!(
+            crate::history::History::load(&app.dirs.history_file())
+                .plays()
+                .len(),
+            1
+        );
+        app.backend.shutdown();
+        let _ = std::fs::remove_dir_all(app.dirs.config.parent().unwrap());
+    }
+
     /// The session remembers fullscreen lyrics and the mode they left, and a
     /// session file from before the field existed still loads.
     #[test]
@@ -14354,6 +14534,7 @@ mod tests {
         app.lyrics_fullscreen = Some(false);
         app.lyrics_restore_maximized = true;
         app.save_session();
+        app.flush_files();
         let session = SessionState::load(&app.dirs.session_file());
         assert_eq!(
             session.lyrics_fullscreen_from,
@@ -14365,6 +14546,7 @@ mod tests {
 
         app.lyrics_fullscreen = None;
         app.save_session();
+        app.flush_files();
         let text = std::fs::read_to_string(app.dirs.session_file()).unwrap();
         assert!(!text.contains("lyrics_fullscreen_from"));
         assert_eq!(
@@ -14461,6 +14643,7 @@ mod tests {
         app.on_now_playing_changed();
         assert_eq!(app.resume_position_ms, 19_566);
         app.save_session();
+        app.flush_files();
         assert_eq!(
             app.resume_position_ms, 19_566,
             "closing again must not lose the position"
@@ -18062,6 +18245,7 @@ mod tests {
         expected.accent = egui::Color32::from_rgb(140, 63, 165);
         assert_eq!(app.palette, expected);
         app.save_settings();
+        app.flush_files();
         let accepted = Settings::load(&app.dirs.settings_file());
         assert!(accepted.custom_theme_cache.is_some());
 
@@ -18108,6 +18292,7 @@ mod tests {
                 .contains("last usable")
             );
             restored.save_settings();
+            restored.flush_files();
             assert_eq!(Settings::load(&restored.dirs.settings_file()), accepted);
         }
         std::fs::remove_dir_all(app.dirs.config.parent().unwrap()).unwrap();
@@ -18126,6 +18311,7 @@ mod tests {
         assert_eq!(app.locale, Locale::PortugueseBrazil);
         assert!(app.settings_dirty);
         app.save_settings();
+        app.flush_files();
         let saved = Settings::load(&app.dirs.settings_file());
         assert_eq!(saved.language, choice);
         let mut restarted = App::new(
@@ -18255,6 +18441,7 @@ mod tests {
         assert_eq!(app.settings.theme, ThemeChoice::System);
         assert!(app.settings.custom_theme.is_none());
         app.save_settings();
+        app.flush_files();
         let saved = Settings::load(&app.dirs.settings_file());
         assert_eq!(saved.cached_palette(), Some(theme.palette));
 
@@ -19047,6 +19234,7 @@ mod tests {
             &["spotify:track:b", "spotify:track:ctx1"],
         );
         app.save_session();
+        app.flush_files();
 
         let options = AppOptions {
             media_controls: false,
@@ -19623,6 +19811,13 @@ mod tests {
         assert_eq!(app.settings.milkdrop_screen_hz, 0, "no screen has spoken");
         assert_eq!(app.settings.milkdrop_fps, crate::milkdrop::DEFAULT_FPS);
 
+        app.learn_screen_hz(1);
+        assert_eq!(
+            app.settings.milkdrop_screen_hz, 0,
+            "Windows's hardware default is no rate"
+        );
+        assert_eq!(app.settings.milkdrop_fps, crate::milkdrop::DEFAULT_FPS);
+
         app.learn_screen_hz(144);
         assert_eq!(app.settings.milkdrop_screen_hz, 144);
         assert_eq!(app.settings.milkdrop_fps, 144, "smooth without being asked");
@@ -19635,6 +19830,21 @@ mod tests {
             "the new screen is noted"
         );
         assert_eq!(app.settings.milkdrop_fps, 30, "their number stands");
+    }
+
+    /// The visualizers' dial offers the rate of the screen showing the main
+    /// window, MilkDrop's until that screen has said, and none before
+    /// either has.
+    #[test]
+    fn the_visualizer_dial_offers_the_main_windows_screen() {
+        let mut app = headless_app();
+        assert_eq!(app.visualiser_screen_hz(), 0, "no screen has said");
+        app.settings.milkdrop_screen_hz = 144;
+        assert_eq!(app.visualiser_screen_hz(), 144, "MilkDrop's meanwhile");
+        app.screen_hz = 165;
+        assert_eq!(app.visualiser_screen_hz(), 165, "the window's own");
+        app.screen_hz = 0;
+        assert_eq!(app.visualiser_screen_hz(), 144, "an unusable answer");
     }
 
     /// A window in the Dock is drawn no frames, so the one frame a Show
@@ -24903,6 +25113,7 @@ mod tests {
         app.settings.theme = crate::settings::ThemeChoice::Light;
         app.settings.proxy_host = "other.example".into();
         app.save_settings();
+        app.flush_files();
         assert_eq!(
             std::fs::read_to_string(app.dirs.settings_file()).unwrap(),
             original
@@ -24912,6 +25123,7 @@ mod tests {
             "do not retry every frame while storage is pending"
         );
         app.handle_proxy_password_stored();
+        app.flush_files();
         let saved = Settings::load(&app.dirs.settings_file());
         assert_eq!(saved.theme, crate::settings::ThemeChoice::Light);
         assert_eq!(
@@ -24960,6 +25172,7 @@ mod tests {
             app.settings.proxy_config().unwrap(),
             Ok(false),
         );
+        app.flush_files();
         assert_eq!(std::fs::read(app.dirs.settings_file()).unwrap(), original);
         // An unlocked native store can finish the launch-time migration while
         // this test runs, in which case deleting the plaintext file is right.
@@ -25039,6 +25252,7 @@ mod tests {
         app.settings.proxy_password = "dummy-private-password".into();
         app.settings.theme = ThemeChoice::Light;
         app.save_settings();
+        app.flush_files();
         let saved = Settings::load(&app.dirs.settings_file());
         assert_eq!(saved.proxy_mode, crate::settings::ProxyMode::System);
         assert_eq!(saved.theme, ThemeChoice::Light);
@@ -25061,6 +25275,7 @@ mod tests {
             app.settings.proxy_port, "8090",
             "keep the draft being edited"
         );
+        app.flush_files();
         assert_eq!(Settings::load(&app.dirs.settings_file()).proxy_port, "8080");
         app.backend.shutdown();
     }
@@ -25081,6 +25296,7 @@ mod tests {
         app.handle_proxy_applied(app.proxy_request, newest.clone(), Ok(false));
         app.handle_proxy_applied(first, old, Ok(false));
         assert_eq!(app.applied_proxy, newest);
+        app.flush_files();
         assert_eq!(Settings::load(&app.dirs.settings_file()).proxy_port, "8090");
         app.backend.shutdown();
     }
@@ -26445,6 +26661,70 @@ mod tests {
         assert_eq!(app.editable_context_playlist(), None, "no context");
     }
 
+    /// Spotify's own apps reorder playlists while Spotifast is in the
+    /// background (#683); coming back reads the tree again, at most every
+    /// `ROOTLIST_REFRESH`, once every playlist has arrived.
+    #[test]
+    fn returning_to_the_window_reads_the_playlist_tree_again() {
+        let mut app = test_app("rootlist-focus");
+        app.auth = AuthStatus::Connected {
+            username: "listener".into(),
+        };
+        let reads = |app: &mut App, focused: bool| {
+            let before = app.rootlist_read_at;
+            let wait = app.window_focus(Some(focused));
+            (app.rootlist_read_at != before, wait)
+        };
+        app.window_focus(Some(false));
+        assert_eq!(reads(&mut app, true), (false, None), "playlists loading");
+        app.library.playlists = Loadable::Loaded(Vec::new());
+        app.library.playlists_next = Some(50);
+        assert_eq!(reads(&mut app, true), (false, None), "more to come");
+        app.load_more(Page::Home);
+        assert_eq!(app.library.playlists_asked, Some(50));
+        assert_eq!(reads(&mut app, true), (false, None), "page on its way");
+        app.library.playlists_asked = None;
+        // The first read clears the request.
+        app.read_rootlist();
+        assert_eq!(reads(&mut app, true), (false, None), "already read");
+
+        // Coming back soon after a read waits for the rest of the interval,
+        // then reads while the window stays focused.
+        app.window_focus(Some(false));
+        let (read, wait) = reads(&mut app, true);
+        assert!(!read);
+        assert!(wait.is_some_and(|wait| wait <= ROOTLIST_REFRESH));
+        app.rootlist_read_at = Some(Instant::now() - ROOTLIST_REFRESH);
+        assert_eq!(reads(&mut app, true), (true, None));
+        assert_eq!(reads(&mut app, true), (false, None), "staying focused");
+
+        // A frame that does not say whether it has focus, such as one run
+        // without a window, is no return.
+        app.rootlist_read_at = Some(Instant::now() - ROOTLIST_REFRESH);
+        app.window_focus(Some(false));
+        assert_eq!(app.window_focus(None), None);
+        assert!(!app.rootlist_wanted, "no word on focus");
+
+        // A return long after the last read reads at once.
+        app.rootlist_read_at = Some(Instant::now() - ROOTLIST_REFRESH);
+        app.window_focus(Some(false));
+        assert_eq!(reads(&mut app, true), (true, None));
+
+        // Closing to the tray and showing the window again is a return,
+        // even when it had focus as it closed; hidden frames read nothing.
+        app.rootlist_read_at = Some(Instant::now() - ROOTLIST_REFRESH);
+        app.window_gone();
+        assert_eq!(reads(&mut app, true), (false, None), "hidden");
+        app.window_hidden = false;
+        assert_eq!(reads(&mut app, true), (true, None), "shown again");
+
+        app.auth = AuthStatus::SignedOut;
+        app.rootlist_read_at = Some(Instant::now() - ROOTLIST_REFRESH);
+        app.window_focus(Some(false));
+        assert_eq!(reads(&mut app, true), (false, None), "signed out");
+        app.backend.shutdown();
+    }
+
     /// Folder order survives a restart, but only for the account that
     /// supplied it; edit grants wait for a fresh session answer.
     #[test]
@@ -26493,6 +26773,7 @@ mod tests {
         }]);
         assert!(app.session_dirty);
         app.save_session();
+        app.flush_files();
         drop(app);
 
         let mut restored = App::new(

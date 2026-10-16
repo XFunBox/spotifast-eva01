@@ -162,9 +162,10 @@ Each Windows release job builds the Inno Setup program
 same binary. The package comes from `packaging/windows/spotifast.wxs` (WiX
 Toolset 5): native-packages selects `windows-amd64` or `windows-arm64` with
 `--defer-recipes` and runs `packaging/windows/build-msi.py`. That script
-compiles the package's custom action (`running-copy.c`) with the job's MSVC
-tools, refuses an executable whose version resource does not carry the release
-version, and runs WiX with `-pdbtype none`, so the package is the only output.
+compiles the package's custom actions (`running-copy.c`,
+`update-leftovers.c`) with the job's MSVC tools, refuses an executable whose
+version resource does not carry the release version, and runs WiX with
+`-pdbtype none`, so the package is the only output.
 
 Windows installs move to the package over two releases. The next release
 ships both `-setup.exe` and `.msi`: earlier versions only know the setup
@@ -189,6 +190,11 @@ INSTALLFOLDER="<the app's folder>"` and accepts exit codes 0 and 3010. The packa
 - replaces every file whatever its version or date (`REINSTALLMODE=amus`).
 - closes a running installed copy before an update, and removes nothing while
   it runs (#766). A portable copy elsewhere is never closed.
+- removes the updater's staging folders (`.spotifast-update-*`, its helper
+  and the previous version) from the installation folder on a real uninstall,
+  so the folder goes too. Never in an update: there the old version is
+  uninstalled while the helper in one of them runs the package
+  (`update-leftovers.c`, conditioned on `REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE`).
 
 To build it on Windows, install WiX with
 `dotnet tool install --global wix --version 5.0.2` and open a Visual Studio
@@ -206,8 +212,9 @@ builds it as the release does.
 `python packaging\windows\test-msi.py [ISCC.exe]` installs, updates and removes
 throwaway copies of the package, with an identity of their own, so it never
 touches a real installation. It covers a running installed copy, a portable
-copy, a missing executable, links another program took over, and takeovers of
-a setup program install. CI runs it on x64 and arm64.
+copy, a missing executable, links another program took over, the updater's
+staging folders in an uninstall and an update, and takeovers of a setup
+program install. CI runs it on x64 and arm64.
 `python packaging\windows\test-uninstall.py ISCC.exe` covers the setup
 program's uninstaller.
 

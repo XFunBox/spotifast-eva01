@@ -1,6 +1,6 @@
 # EVA-01 Audio · Spotifast
 
-Spotifast 0.13.0 con temas Evangelion, skin NERV e instaladores para Linux y Windows. Incluye el código original en `upstream/`, sin modificaciones al motor de audio, y conserva su licencia MIT y autoría.
+Spotifast 0.13.3 con temas Evangelion, skin NERV e instaladores para Linux y Windows. Incluye el código original en `upstream/`, sin modificaciones al motor de audio, y conserva su licencia MIT y autoría.
 
 ![Vista previa de la skin compacta](eva/assets/EVA-01-preview.png)
 
@@ -48,6 +48,10 @@ Al ser un repositorio privado, clonar o descargar el código requiere una cuenta
 
 ## Temas y controles
 
+**NERV Nightshift** es la segunda interfaz opcional para Linux: ventana sencilla,
+verde neón, carátula y controles para trabajar. Instalación y atajos en
+[docs/nightshift.md](docs/nightshift.md).
+
 - **EVA-01**: negro, morado y verde vivo.
 - **EVA-01 Terminal**: negro verdoso y verde vivo.
 - **EVA-01.wsz**: skin clásica completa, 15 hojas de sprites, títulos de consola NERV y ecualizador AT FIELD.
@@ -60,7 +64,7 @@ La skin y paleta principal se pueden regenerar con `python3 eva/build_theme.py` 
 
 ## Código, versión y validación
 
-El código de `upstream/` corresponde a `crmne/spotifast`, tag **v0.13.0**, commit `36964f19e2fb1154d5e87973d76928c7ddbeaf06`. Para compilarlo, sigue [upstream/README.md](upstream/README.md) y [upstream/CONTRIBUTING.md](upstream/CONTRIBUTING.md), desde esa carpeta. Los instaladores usan los binarios oficiales; no recompilan el programa.
+El código de `upstream/` corresponde a `crmne/spotifast`, tag **v0.13.3**, commit `a4c1b3ef6c9667507f198312453766f6ba953710`. Para compilarlo, sigue [upstream/README.md](upstream/README.md) y [upstream/CONTRIBUTING.md](upstream/CONTRIBUTING.md), desde esa carpeta. Los instaladores usan los binarios oficiales; no recompilan el programa.
 
 [Documentación de despliegue](docs/DEPLOYMENT.md) · [Validación](docs/VERIFICATION.md) · [Licencia](LICENSE) · [Procedencia](NOTICE.md).
 

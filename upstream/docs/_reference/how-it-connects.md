@@ -55,7 +55,9 @@ Spotify" spinner, since nothing on screen waits for it.
 
 Web API sign-in opens the browser only after its local callback port is available. If
 port 8989 is occupied, the sign-in screen keeps the error visible. Close the
-app using that port, then choose **Try again**.
+app using that port, then choose **Try again**. Since 0.13.2, playback setup
+does the same with its port, 8898: if another app holds it, Settings shows the
+error, the browser stays closed, and a saved playback approval is kept.
 
 Artist pages read popular tracks over the verified account's local playback
 session when it is ready. The list uses that account's country, or Spotify's
@@ -129,7 +131,12 @@ Since 0.8.0, explicitly sorting a Library section loads its remaining
 pages through the existing Web API grant, one at a time, while loaded entries
 stay visible. A failed page stops automatic loading. Spotify custom playlist
 order uses the existing account-scoped rootlist from local playback; sorting
-and dragging never write that order back to Spotify.
+and dragging never write that order back to Spotify. When the window regains
+focus, or is shown again from the tray, after every playlist page has loaded,
+Spotifast reads the rootlist again over the playback session, at most once
+every 5 seconds, so an order changed in another Spotify app appears without a
+restart. A return sooner than that reads once the 5 seconds have passed. This
+read uses no Web API quota.
 
 Since 0.9.0, a playlist-folder and invitation-permission read requested
 before local playback connects waits for that connection instead of being lost.
@@ -219,8 +226,9 @@ loading or error state.
 Each cover uses the smallest artwork URL already present in Spotify metadata
 with at least a quarter more pixels than the cover takes on the display.
 Spotify's 64-pixel thumbnail serves only covers of 32 pixels or less, so at
-100% scaling library rows, cards and page headers use the 300-pixel URL, and
-from 125% page headers use the 640-pixel one, as cards do from 200%. Page tint
+100% scaling library rows, cards and page headers use the 300-pixel URL. Of
+the usual 25% scaling steps, page headers use the 640-pixel one from 125% and
+cards from 175% (to the whole percent, from 114% and 163%). Page tint
 extraction and softened loading previews use 64-pixel thumbnails. These URLs
 remain unchanged and follow the configured proxy and normal artwork cache.
 Choosing an artwork size and reusing known details add no Web API request.
@@ -400,8 +408,8 @@ Starting Spotify on a Cast device needs local playback enabled, because the
 playback session obtains the token. When a Cast device is selected, Spotifast
 follows the steps of Spotify's own apps:
 
-1. It opens a Cast v2 connection to the device and launches Spotify's Cast
-   receiver.
+1. It opens a Cast v2 connection to the device, checks that the device is a
+   genuine Cast device (see below), and launches Spotify's Cast receiver.
 2. The receiver's `getInfo` reply names the Spotify client it runs as.
 3. The librespot session asks Spotify for a token issued to that client and
    to the device's ID (`/device-auth/v1/refresh`, an internal endpoint).
@@ -413,16 +421,28 @@ like any other device. Right after an earlier sign-in, a receiver can
 refuse the first attempt, so Spotifast tries once more. A device that does
 not answer within 20 seconds is reported as not answering.
 
-Cast devices present certificates from Google's device CA, which system trust
-stores do not hold. Spotifast therefore accepts any certificate on this
-connection. It still checks the handshake signature against the certificate the
-device presents, so other machines that only listen cannot read the traffic,
-but nothing proves the device is a genuine Cast device: whatever answers at the
-address of the device you select receives the token. The connection only goes
-to a device found on the local network, as with the Spotify Connect receivers
-above. The token is issued for the Spotify client and device ID that the
-receiver names in its `getInfo` reply, not the reusable playback credential.
-Spotifast does not save or log the token.
+A Cast device presents a TLS certificate of its own, which system trust stores
+do not hold, so the connection accepts any certificate. Since 0.13.1, before
+sending anything else, Spotifast asks the device to prove it is genuine, as
+Chrome does. It
+sends a random challenge on Cast's `deviceauth` channel. The device signs the
+challenge and the certificate of this connection with its device key, and
+sends that key's certificate chain. Spotifast checks that the chain leads to
+one of Google's two Cast root certificates, which it carries, that the device
+certificate is one for signing, and that the signature is valid. Because only
+that signature vouches for the connection's certificate, the connection's
+certificate must also be valid now and for no more than four more days, as
+Chrome requires. If any check fails, Spotifast stops. It does not start
+Spotify on the device or ask for a token, and it reports that the device could
+not prove it is genuine. As in Chrome, older devices that sign with SHA-1 are
+accepted, and the revocation list a device may send with its answer is not
+checked (Chrome only checks it when told to require one). Spotifast 0.13.0
+made no such check: whatever answered at the address of the selected device
+received the token.
+
+The token is issued for the Spotify client and device ID that the receiver
+names in its `getInfo` reply, not the reusable playback credential. Spotifast
+does not save or log the token.
 
 ## The engine
 
@@ -433,6 +453,15 @@ On macOS, while the system reports no route to the internet at all, the
 reconnection waits for one instead of retrying. Spotifast asks the system
 about the internet as a whole rather than about a Spotify host, so the check
 looks up no name and sends nothing over the network.
+
+Since 0.13.2, a playback connection that fails while the network is up, for
+example with a connection reset after the computer wakes, is tried again with
+the saved playback approval: after 5 and 15 seconds, 1, 2 and 5 minutes, and
+then every 10 minutes until it connects. These attempts keep the error on
+screen instead of flickering through "Connecting", and they stop when
+Spotify rejects the approval, playback is set up again, or you sign out.
+**Set up playback here** and **Try again** first reconnect with the saved
+approval; the browser opens only when there is none or Spotify rejects it.
 
 On macOS, local playback and track loading declare a user-initiated activity
 so App Nap does not throttle them when another application covers Spotifast.

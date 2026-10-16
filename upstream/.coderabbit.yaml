@@ -23,3 +23,13 @@ reviews:
           fork, a patch, override, or replace entry, or another registry, in
           a manifest, lockfile, or package manager configuration. Pass
           otherwise.
+      - name: No new settings without approval
+        mode: error
+        instructions: >-
+          Fail when the pull request adds a user setting, such as a new field
+          in a Settings struct in src/settings.rs, a toggle, a slider, or an
+          option in the Settings view, unless the linked issue shows the
+          maintainer (crmne) approving that setting or the pull request has
+          the setting-approved label. The project prefers a good default, a
+          keyboard shortcut, or a command; see Settings in CONTRIBUTING.md.
+          Pass when the pull request adds no setting.

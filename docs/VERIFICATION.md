@@ -8,4 +8,8 @@ La CI ejecuta pruebas en Ubuntu 24.04 y Windows PowerShell 5.1. También instala
 
 Las pruebas no inician sesión en Spotify ni reproducen audio. La reproducción completa y el render del modo compacto en una sesión autenticada Windows no se han comprobado. No se ha compilado el código Rust vendorizado, pues no se ha modificado y el despliegue utiliza los binarios oficiales.
 
-Verificación local del instalador Linux: ocho regresiones aprobadas y despliegue real aislado con descarga oficial, hash correcto, `spotifast 0.13.0` y acceso validado por `desktop-file-validate`. Windows se verifica en el runner de Actions.
+Verificación inicial del instalador Linux (0.13.0): ocho regresiones aprobadas y despliegue real aislado con descarga oficial, hash correcto y acceso validado por `desktop-file-validate`. Windows se verifica en el runner de Actions.
+
+Actualización del 16/10/2026: binario oficial 0.13.3 verificado por SHA256 e instalado en EVA-01 Audio y en el motor extraído de Nightshift. Ambos informan `spotifast 0.13.3`; la configuración permanece idéntica durante la sustitución y se conserva copia de la versión anterior. La consulta local del reproductor funciona después del reinicio. Los 333 archivos del snapshot coinciden con el árbol Git oficial del commit registrado en `eva/release-lock.json`.
+
+Las 15 regresiones locales pasan: ocho del instalador Linux y siete de Nightshift, incluyendo protocolo de estado, comandos serializados, cierre y sliders con teclado. La CI incorpora estas últimas con Qt en modo offscreen. Nightshift se ha abierto en la sesión KDE real; no se automatizan órdenes de reproducción sobre la cuenta personal.

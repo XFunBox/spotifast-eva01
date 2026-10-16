@@ -49,6 +49,11 @@ const HOME_EPISODES_PER_SHOW: u32 = 5;
 pub const PLAYLIST_PAGE_SIZE: u32 = 50;
 const RECONNECT_WINDOW: Duration = Duration::from_secs(600);
 const RECONNECT_LIMIT: usize = 6;
+/// Seconds between background attempts to bring the engine back with the
+/// saved playback grant after a connection failure that was not a rejected
+/// grant (#818). The last delay repeats, so a session lost overnight comes
+/// back on its own at the cost of one connection attempt every ten minutes.
+const ENGINE_RETRY_DELAYS: [u64; 6] = [5, 15, 60, 120, 300, 600];
 
 async fn connect_engine_with_deadline<F: std::future::Future>(
     connect: F,
@@ -695,6 +700,10 @@ pub enum Command {
     NetworkStatus(bool),
     /// Internal: librespot's session ended on its own.
     Reconnect,
+    /// Internal: the backoff after a failed engine connection has passed.
+    RetryEngine {
+        generation: u64,
+    },
     /// Look for Spotify Connect receivers on the local network.
     DiscoverReceivers,
     /// Send the account to a receiver so it joins Spotify Connect.
@@ -1637,6 +1646,16 @@ struct Worker {
     network_reachable: bool,
     waiting_for_network: bool,
     engine_attempt: u64,
+    /// Failed engine connections in a row that the saved grant is retrying.
+    engine_retries: usize,
+    /// Bumped to drop a scheduled retry that is no longer wanted.
+    engine_retry_generation: u64,
+    /// The engine connection in flight is a background retry: it does not
+    /// announce itself, and its failure keeps the error already shown.
+    engine_retry_quiet: bool,
+    /// The user asked to set up playback and the saved grant is being tried
+    /// first. Only Spotify rejecting it opens the browser.
+    authorize_if_rejected: bool,
 }
 
 impl Worker {
@@ -1703,6 +1722,10 @@ impl Worker {
             network_reachable: true,
             waiting_for_network: false,
             engine_attempt: 0,
+            engine_retries: 0,
+            engine_retry_generation: 0,
+            engine_retry_quiet: false,
+            authorize_if_rejected: false,
         }
     }
 
@@ -2182,6 +2205,7 @@ impl Worker {
                     self.finish_playback_authorization(attempt)
                 }
                 Command::Reconnect => self.reconnect_engine(),
+                Command::RetryEngine { generation } => self.retry_engine(generation),
                 Command::DiscoverReceivers => self.discover_receivers(),
                 Command::ActivateReceiver(receiver) => self.activate_receiver(*receiver),
                 Command::CheckForUpdates { manual, source } => {
@@ -2943,6 +2967,8 @@ impl Worker {
         self.resume = None;
         self.resume_verify = None;
         self.waiting_for_network = false;
+        self.cancel_engine_retry();
+        self.authorize_if_rejected = false;
         self.album_type_lookup.reset_session();
         self.audiobook_lookup.clear();
         self.playlist_header_lookup.clear_engine_work();
@@ -3082,6 +3108,48 @@ impl Worker {
         self.replace_engine();
     }
 
+    /// Try the saved grant again after a backoff. Each failure in a row
+    /// waits longer, up to the last of `ENGINE_RETRY_DELAYS`.
+    fn schedule_engine_retry(&mut self) {
+        let delay = ENGINE_RETRY_DELAYS[self.engine_retries.min(ENGINE_RETRY_DELAYS.len() - 1)];
+        self.engine_retries += 1;
+        self.engine_retry_generation += 1;
+        let generation = self.engine_retry_generation;
+        log::info!("local playback connection failed; trying again in {delay}s");
+        let commands = self.commands.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(delay)).await;
+            let _ = commands.send(Command::RetryEngine { generation });
+        });
+    }
+
+    fn cancel_engine_retry(&mut self) {
+        self.engine_retries = 0;
+        self.engine_retry_generation += 1;
+    }
+
+    /// A scheduled retry is due. It runs quietly: the error already shown
+    /// stays until the engine is back, and network reachability still
+    /// decides whether to connect at all.
+    fn retry_engine(&mut self, generation: u64) {
+        if generation != self.engine_retry_generation
+            || !self.signed_in
+            || self.engine.is_some()
+            || self.engine_busy
+            || self.cancel_signin.is_some()
+            || self.playback_grant.is_none()
+        {
+            return;
+        }
+        if self.network_reachable {
+            self.engine_retry_quiet = true;
+        }
+        self.resume_engine();
+        if !self.engine_busy {
+            self.engine_retry_quiet = false;
+        }
+    }
+
     /// Keeps the level being heard for the next engine, and lets what the
     /// engine was heard at go with it, so a level from an engine that is
     /// gone never overrides a setting that arrives after it.
@@ -3106,10 +3174,48 @@ impl Worker {
         }
     }
 
+    /// Set up playback on this computer. A saved playback grant for this
+    /// account is tried first; the browser opens only when there is none or
+    /// Spotify rejects it (#818, #824).
+    fn authorize_playback(&mut self) {
+        if self.cancel_signin.is_some() {
+            return;
+        }
+        if self.engine_busy {
+            if std::mem::take(&mut self.engine_retry_quiet) {
+                // A background retry is already connecting: show it.
+                self.authorize_if_rejected = true;
+                self.emit(Event::Playback(LocalPlayback::Connecting));
+            }
+            return;
+        }
+        if self.premium == Some(false) {
+            self.emit(Event::Playback(LocalPlayback::Failed(
+                PREMIUM_NEEDED.into(),
+            )));
+            return;
+        }
+        let saved = self
+            .playback_grant
+            .as_ref()
+            .is_some_and(|grant| playback_account_matches(grant, self.api.account()));
+        if saved && self.signed_in && self.engine.is_none() {
+            self.cancel_engine_retry();
+            self.pending_playback_grant = None;
+            self.authorize_if_rejected = true;
+            self.resume_engine();
+            if self.engine_busy || self.waiting_for_network {
+                return;
+            }
+            self.authorize_if_rejected = false;
+        }
+        self.authorize_playback_in_browser();
+    }
+
     /// Start (or re-enter) the playback authorization in the browser. This is
     /// a distinct grant from the Web API sign-in: it uses Spotify's streaming
     /// client identity, the one librespot can play with.
-    fn authorize_playback(&mut self) {
+    fn authorize_playback_in_browser(&mut self) {
         let http = match self.http.client() {
             Ok(http) => http,
             Err(error) => {
@@ -3120,17 +3226,23 @@ impl Worker {
         if self.engine_busy || self.cancel_signin.is_some() {
             return;
         }
-        if self.premium == Some(false) {
-            self.emit(Event::Playback(LocalPlayback::Failed(
-                PREMIUM_NEEDED.into(),
-            )));
-            return;
-        }
+        let grant = crate::auth::Grant::playback();
+        // Reserve the callback port before touching the saved grant or
+        // opening the browser (#899, as #754 did for the Web API). A busy
+        // port must keep the saved grant and show the conflict, not send the
+        // approval to whichever app holds the port.
+        let listener = match crate::auth::listen_for_redirect(grant.redirect_port) {
+            Ok(listener) => listener,
+            Err(error) => {
+                self.emit(Event::Playback(LocalPlayback::Failed(error.to_string())));
+                return;
+            }
+        };
+        self.cancel_engine_retry();
         self.credentials.invalidate(CredentialSlot::Playback);
         self.authorization_attempt += 1;
         let attempt = self.authorization_attempt;
         let lease = self.credentials.lease(CredentialSlot::Playback);
-        let grant = crate::auth::Grant::playback();
         let flow = crate::auth::begin(grant.clone());
         let (cancel_tx, cancel_rx) = watch::channel(false);
         self.cancel_signin = Some(cancel_tx);
@@ -3147,8 +3259,8 @@ impl Worker {
         let commands = self.commands.clone();
         tokio::spawn(async move {
             let result = async {
-                let code =
-                    crate::auth::wait_for_code(grant.redirect_port, &flow.state, cancel_rx).await?;
+                let code = crate::auth::wait_for_code_on_listener(listener, &flow.state, cancel_rx)
+                    .await?;
                 crate::auth::exchange_code(&http, &grant, &code, &flow.verifier).await
             }
             .await;
@@ -3203,7 +3315,9 @@ impl Worker {
         self.engine_busy = true;
         self.engine_attempt = self.engine_attempt.wrapping_add(1);
         let attempt = self.engine_attempt;
-        self.emit(Event::Playback(LocalPlayback::Connecting));
+        if !self.engine_retry_quiet {
+            self.emit(Event::Playback(LocalPlayback::Connecting));
+        }
         let lease = self.credentials.lease(CredentialSlot::Playback);
         let config = self.engine_config.clone();
         let proxy = config.proxy.librespot_url();
@@ -3297,10 +3411,13 @@ impl Worker {
             self.start_prerelease();
             return;
         }
+        let quiet = std::mem::take(&mut self.engine_retry_quiet);
+        let authorize_if_rejected = std::mem::take(&mut self.authorize_if_rejected);
         match engine {
             Some(engine) => {
                 self.waiting_for_network = false;
                 self.pending_playback_grant = None;
+                self.cancel_engine_retry();
                 if let Some(grant) = engine.credentials() {
                     if !playback_account_matches(&grant, self.api.account()) {
                         engine.shutdown();
@@ -3357,13 +3474,29 @@ impl Worker {
                         self.reconnects.push(now);
                         self.resume_engine();
                     }
+                } else if authorize_if_rejected && is_rejected_grant(error.as_deref()) {
+                    // The user asked for playback and the saved grant no
+                    // longer works: ask Spotify for a new one.
+                    self.waiting_for_network = false;
+                    self.pending_playback_grant = None;
+                    self.resume = None;
+                    self.authorize_playback_in_browser();
                 } else {
                     self.waiting_for_network = false;
                     self.pending_playback_grant = None;
                     self.resume = None;
                     let message = error.unwrap_or_else(|| "Local playback is unavailable".into());
                     self.fail_waiting_prerelease(&message);
-                    self.emit(Event::Playback(LocalPlayback::Failed(message)));
+                    // A dropped or reset connection is not a rejected grant:
+                    // keep trying the saved one in the background (#818).
+                    if self.playback_grant.is_some()
+                        && !is_terminal_credential_error(Some(&message))
+                    {
+                        self.schedule_engine_retry();
+                    }
+                    if !quiet {
+                        self.emit(Event::Playback(LocalPlayback::Failed(message)));
+                    }
                 }
             }
         }
@@ -4073,6 +4206,17 @@ fn friendly_connect_error(error: &anyhow::Error) -> String {
     } else {
         text
     }
+}
+
+/// Spotify refused the playback grant itself, as opposed to the connection
+/// failing on the way.
+fn is_rejected_grant(error: Option<&str>) -> bool {
+    error.is_some_and(|msg| {
+        let lower = msg.to_lowercase();
+        lower.contains("badcredentials")
+            || lower.contains("bad credentials")
+            || lower.contains("rejected the saved sign-in")
+    })
 }
 
 fn is_terminal_credential_error(error: Option<&str>) -> bool {
@@ -7030,6 +7174,207 @@ mod authorization_tests {
             assert!(worker.authorizing_source.is_none());
             assert_eq!(worker.authorization_attempt, 0);
         }
+    }
+
+    /// Tests that bind the playback callback port take turns.
+    static PLAYBACK_PORT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn failed(events: &std::sync::mpsc::Receiver<Event>) -> Vec<String> {
+        events
+            .try_iter()
+            .filter_map(|event| match event {
+                Event::Playback(LocalPlayback::Failed(message)) => Some(message),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A connection reset with the network up is retried with the saved
+    /// grant, quietly and with a growing backoff (#818).
+    #[test]
+    fn failed_engine_connection_retries_with_the_saved_grant() {
+        let (runtime, mut worker, events) = worker("engine-retry");
+        let _entered = runtime.enter();
+        verify(&mut worker, ApiSource::Shared, "alice");
+        worker.playback_grant = Some(Credentials::with_password("alice", "dummy-grant"));
+        let session = worker.album_type_lookup.session_generation;
+        let reset = "Couldn't reach Spotify: connection reset";
+
+        worker.connect_engine(Credentials::with_password("alice", "dummy-grant"));
+        worker.on_engine_connected(session, None, Some(reset.into()), worker.engine_attempt);
+        assert_eq!(failed(&events), [reset]);
+        assert_eq!(worker.engine_retries, 1);
+        assert!(worker.playback_grant.is_some());
+
+        // A retry superseded by something newer does nothing.
+        worker.retry_engine(worker.engine_retry_generation - 1);
+        assert!(!worker.engine_busy);
+
+        worker.retry_engine(worker.engine_retry_generation);
+        assert!(worker.engine_busy);
+        assert!(worker.engine_retry_quiet);
+        let received: Vec<_> = events.try_iter().collect();
+        assert!(
+            !received
+                .iter()
+                .any(|event| matches!(event, Event::Playback(LocalPlayback::Connecting))),
+            "a background retry flickered the status"
+        );
+        worker.on_engine_connected(session, None, Some(reset.into()), worker.engine_attempt);
+        assert!(
+            failed(&events).is_empty(),
+            "a quiet retry repeated the error"
+        );
+        assert_eq!(worker.engine_retries, 2);
+        assert!(!worker.engine_retry_quiet);
+    }
+
+    /// A rejected grant is not retried in the background, and nothing is
+    /// retried while the network is down.
+    #[test]
+    fn rejected_grant_and_offline_failures_are_not_retried() {
+        let (runtime, mut worker, events) = worker("engine-retry-rejected");
+        let _entered = runtime.enter();
+        verify(&mut worker, ApiSource::Shared, "alice");
+        worker.playback_grant = Some(Credentials::with_password("alice", "dummy-grant"));
+        let session = worker.album_type_lookup.session_generation;
+
+        worker.connect_engine(Credentials::with_password("alice", "dummy-grant"));
+        worker.on_engine_connected(
+            session,
+            None,
+            Some("Spotify rejected the saved sign-in. Please sign in again.".into()),
+            worker.engine_attempt,
+        );
+        assert_eq!(failed(&events).len(), 1);
+        assert_eq!(worker.engine_retries, 0);
+
+        worker.network_reachable = false;
+        worker.connect_engine(Credentials::with_password("alice", "dummy-grant"));
+        worker.on_engine_connected(
+            session,
+            None,
+            Some("timed out".into()),
+            worker.engine_attempt,
+        );
+        assert!(worker.waiting_for_network);
+        assert_eq!(worker.engine_retries, 0);
+    }
+
+    /// "Set up playback here" reconnects with a saved grant instead of
+    /// clearing it and opening the browser (#818, #824).
+    #[test]
+    fn set_up_playback_reconnects_with_the_saved_grant_first() {
+        let (runtime, mut worker, events) = worker("set-up-with-saved-grant");
+        let _entered = runtime.enter();
+        verify(&mut worker, ApiSource::Shared, "alice");
+        worker.playback_grant = Some(Credentials::with_password("alice", "dummy-grant"));
+        let lease = worker.credentials.lease(CredentialSlot::Playback);
+        let attempt = worker.authorization_attempt;
+        let _ = events.try_iter().count();
+
+        worker.authorize_playback();
+
+        assert!(worker.engine_busy);
+        assert!(worker.authorize_if_rejected);
+        assert!(worker.cancel_signin.is_none());
+        assert_eq!(worker.authorization_attempt, attempt);
+        assert!(lease.current(), "the saved grant was invalidated");
+        let received: Vec<_> = events.try_iter().collect();
+        assert!(
+            received
+                .iter()
+                .any(|event| matches!(event, Event::Playback(LocalPlayback::Connecting)))
+        );
+        assert!(
+            !received
+                .iter()
+                .any(|event| matches!(event, Event::Playback(LocalPlayback::Authorizing)))
+        );
+
+        // Only Spotify rejecting the grant goes to the browser. The port is
+        // held so the browser flow stops at its port check and opens nothing.
+        let _port = PLAYBACK_PORT.lock().unwrap_or_else(|p| p.into_inner());
+        let _occupied =
+            std::net::TcpListener::bind(("127.0.0.1", crate::auth::PLAYBACK_REDIRECT_PORT))
+                .unwrap();
+        let session = worker.album_type_lookup.session_generation;
+        worker.on_engine_connected(
+            session,
+            None,
+            Some("Spotify rejected the saved sign-in. Please sign in again.".into()),
+            worker.engine_attempt,
+        );
+        let messages = failed(&events);
+        assert_eq!(messages.len(), 1);
+        assert!(messages[0].contains("8898"), "{messages:?}");
+        assert!(!worker.authorize_if_rejected);
+    }
+
+    /// Clicking while a background retry is connecting shows that attempt
+    /// rather than starting another one.
+    #[test]
+    fn set_up_playback_during_a_quiet_retry_shows_it() {
+        let (runtime, mut worker, events) = worker("set-up-during-retry");
+        let _entered = runtime.enter();
+        verify(&mut worker, ApiSource::Shared, "alice");
+        worker.playback_grant = Some(Credentials::with_password("alice", "dummy-grant"));
+        worker.engine_retry_quiet = true;
+        worker.connect_engine(Credentials::with_password("alice", "dummy-grant"));
+        let engine_attempt = worker.engine_attempt;
+        let _ = events.try_iter().count();
+
+        worker.authorize_playback();
+
+        assert_eq!(worker.engine_attempt, engine_attempt);
+        assert!(!worker.engine_retry_quiet);
+        assert!(worker.authorize_if_rejected);
+        assert!(
+            events
+                .try_iter()
+                .any(|event| matches!(event, Event::Playback(LocalPlayback::Connecting)))
+        );
+    }
+
+    /// A busy playback callback port reports the conflict and leaves the
+    /// saved playback grant alone, without opening the browser (#899).
+    #[test]
+    fn occupied_playback_port_keeps_the_saved_grant() {
+        let _port = PLAYBACK_PORT.lock().unwrap_or_else(|p| p.into_inner());
+        let (runtime, mut worker, events) = worker("occupied-playback-port");
+        let _entered = runtime.enter();
+        verify(&mut worker, ApiSource::Shared, "alice");
+        let saved = worker.credentials.lease(CredentialSlot::Playback);
+        runtime
+            .block_on(saved.save(StoredGrant::Playback(Credentials::with_password(
+                "alice",
+                "dummy-saved-grant",
+            ))))
+            .unwrap();
+        let _ = events.try_iter().count();
+        let _occupied =
+            std::net::TcpListener::bind(("127.0.0.1", crate::auth::PLAYBACK_REDIRECT_PORT))
+                .unwrap();
+        let attempt = worker.authorization_attempt;
+
+        worker.authorize_playback();
+
+        let received: Vec<_> = events.try_iter().collect();
+        assert!(received.iter().any(|event| matches!(event,
+            Event::Playback(LocalPlayback::Failed(message)) if message.contains("8898")
+        )));
+        assert!(
+            !received
+                .iter()
+                .any(|event| matches!(event, Event::Playback(LocalPlayback::Authorizing)))
+        );
+        assert!(worker.cancel_signin.is_none());
+        assert_eq!(worker.authorization_attempt, attempt);
+        assert!(saved.current(), "the saved grant was invalidated");
+        assert!(matches!(
+            runtime.block_on(saved.load()).unwrap().grant,
+            Some(StoredGrant::Playback(grant)) if grant.username.as_deref() == Some("alice")
+        ));
     }
 
     #[test]

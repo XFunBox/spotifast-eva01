@@ -112,6 +112,16 @@ request; the maintainer can carry it in a `crmne` fork until a release
 includes it. CI fails when `Cargo.toml`, `Cargo.lock` or `.cargo/config.toml`
 names any other git source or registry.
 
+### Settings
+
+Do not add a setting (a new field in `Settings`, a toggle, a slider, a choice
+of options) without the maintainer's approval in the issue first. The answer is
+usually no: prefer a good default that serves everyone, or a keyboard shortcut
+or command for the people who want something else. A pull request that adds a
+setting without that approval will be asked to remove it. CI fails when a pull
+request adds a field to a `Settings` struct in `src/settings.rs`, until the
+maintainer adds the `setting-approved` label.
+
 ### Visual reviews
 
 Review evidence lives in the pull request, never in the repository. Attach
@@ -159,6 +169,7 @@ Run the same checks CI runs before submitting:
 ```sh
 python3 .github/scripts/check-dependency-sources.py
 python3 .github/scripts/check-review-evidence.py
+python3 .github/scripts/check-new-settings.py --base origin/main
 python3 packaging/test-launchers.py
 cargo fmt --all --check
 cargo clippy --locked --all-targets -- -D warnings
@@ -200,8 +211,8 @@ Translation changes also need `.github/scripts/update-translations.sh --check`,
 using GNU gettext tools with Rust support. Run the script without `--check` when
 translatable source strings change, and review any fuzzy or missing entries in
 the updated PO files. Normal Cargo builds compile the catalogs without gettext
-tools. See [Translating Spotifast](docs/_reference/translating.md) for the pilot
-scope and contributor workflow.
+tools. See [Translating Spotifast](docs/_reference/translating.md) for language
+coverage and the contributor workflow.
 
 Documentation deployments take their canonical URL from the domain configured
 in GitHub Pages. When changing domains, configure DNS and GitHub Pages before

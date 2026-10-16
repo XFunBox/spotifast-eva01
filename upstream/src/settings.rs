@@ -266,6 +266,9 @@ pub struct Settings {
     pub player_bar_vis: PlayerBarVis,
     /// Allow clicks on the player bar background to cycle visualizer modes.
     pub player_bar_vis_click: bool,
+    /// How many frames a second the player bar's visualizer and the mini
+    /// player's analyser draw; 0 is uncapped. MilkDrop has its own.
+    pub visualizer_fps: u32,
     /// Last local volume, 0..=65535.
     pub volume: u16,
     /// Whether the library sidebar is visible.
@@ -439,6 +442,7 @@ impl Default for Settings {
             accent_from_art: true,
             player_bar_vis: PlayerBarVis::Off,
             player_bar_vis_click: true,
+            visualizer_fps: crate::milkdrop::DEFAULT_FPS,
             volume: (u16::MAX as u32 * 70 / 100) as u16,
             sidebar_visible: true,
             art_expanded: false,
@@ -584,6 +588,7 @@ impl Settings {
                     Self::default()
                 });
                 settings.migrate_proxy(text);
+                settings.forget_unusable_screen_rate();
                 settings.proxy_password_legacy = !settings.proxy_password.is_empty();
                 settings
             }
@@ -591,14 +596,17 @@ impl Settings {
         }
     }
 
+    /// The settings as their file holds them.
+    pub fn encode(&self) -> Option<String> {
+        serde_json::to_string_pretty(self)
+            .map_err(|error| log::warn!("unable to encode settings: {error}"))
+            .ok()
+    }
+
+    /// Writes the settings and waits for the disk. The app saves through
+    /// its [`fastframe_file::Writer`] instead.
     pub fn save(&self, path: &Path) {
-        let text = match serde_json::to_string_pretty(self) {
-            Ok(text) => text,
-            Err(error) => {
-                log::warn!("unable to encode settings: {error}");
-                return;
-            }
-        };
+        let Some(text) = self.encode() else { return };
         if let Err(error) = fastframe_file::write(path, text) {
             log::warn!("unable to save settings to {}: {error}", path.display());
         }
@@ -622,6 +630,21 @@ impl Settings {
         self.search_history.retain(|entry| entry != query);
         self.search_history.insert(0, query.to_string());
         self.search_history.truncate(12);
+    }
+
+    /// Forgets the frame rate an earlier version set from Windows's 1 Hz
+    /// "hardware default", taken then as MilkDrop's first screen rate, and
+    /// that screen rate with it, so MilkDrop's next real report is learned
+    /// as the first. A frame rate chosen since, or learned from a real
+    /// screen before, stays, and so does the 1 Hz beside it, which no dial
+    /// shows and the next real report replaces.
+    pub(crate) fn forget_unusable_screen_rate(&mut self) {
+        let hz = self.milkdrop_screen_hz;
+        if hz == 0 || crate::milkdrop::is_screen_rate(hz) || self.milkdrop_fps != hz {
+            return;
+        }
+        self.milkdrop_fps = crate::milkdrop::DEFAULT_FPS;
+        self.milkdrop_screen_hz = 0;
     }
 
     pub(crate) fn migrate_proxy(&mut self, text: &str) {
@@ -1065,6 +1088,35 @@ mod tests {
         assert!(!settings.home.made_for_you.visible);
     }
 
+    /// Earlier versions kept Windows's 1 Hz "hardware default" as MilkDrop's
+    /// screen rate and, the first time, as its frame rate. Loading forgets
+    /// both, and leaves a frame rate chosen since, and a real rate, alone.
+    #[test]
+    fn a_saved_hardware_default_screen_rate_is_forgotten() {
+        let dir =
+            std::env::temp_dir().join(format!("spotifast-screen-default-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("settings.json");
+        let load = |text: &str| {
+            std::fs::write(&path, text).unwrap();
+            let settings = Settings::load(&path);
+            (settings.milkdrop_screen_hz, settings.milkdrop_fps)
+        };
+        let learned = load(r#"{"milkdrop_screen_hz":1,"milkdrop_fps":1}"#);
+        let chosen = load(r#"{"milkdrop_screen_hz":1,"milkdrop_fps":30}"#);
+        let sixty = load(r#"{"milkdrop_screen_hz":1,"milkdrop_fps":60}"#);
+        let real = load(r#"{"milkdrop_screen_hz":144,"milkdrop_fps":144}"#);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(learned, (0, crate::milkdrop::DEFAULT_FPS));
+        assert_eq!(chosen, (1, 30), "their rate stands");
+        assert_eq!(
+            sixty,
+            (1, 60),
+            "a chosen 60 is not taken for the default, which a real report would replace"
+        );
+        assert_eq!(real, (144, 144), "a real rate stays");
+    }
+
     #[test]
     fn older_settings_keep_the_sidebar_visible() {
         let settings: Settings = serde_json::from_str("{}").unwrap();
@@ -1184,6 +1236,32 @@ mod tests {
         let json = serde_json::to_string(&settings).unwrap();
         let restored: Settings = serde_json::from_str(&json).unwrap();
         assert!(restored.tracklist_compact);
+    }
+
+    /// The main window's visualizers draw 60 frames a second until the user
+    /// picks another rate, and the rate they pick, uncapped included, is
+    /// the rate they get back, without touching MilkDrop's.
+    #[test]
+    fn the_visualizer_frame_rate_defaults_to_60_and_round_trips() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.visualizer_fps, 60);
+        assert_eq!(Settings::default().visualizer_fps, 60);
+        for rate in [30, 144, 0] {
+            let chosen = Settings {
+                visualizer_fps: rate,
+                ..Settings::default()
+            };
+            let json = serde_json::to_string(&chosen).unwrap();
+            let restored: Settings = serde_json::from_str(&json).unwrap();
+            assert_eq!(restored.visualizer_fps, rate);
+            assert_eq!(restored.milkdrop_fps, Settings::default().milkdrop_fps);
+        }
+        let milkdrop_only: Settings =
+            serde_json::from_value(serde_json::json!({"milkdrop_fps": 30})).unwrap();
+        assert_eq!(
+            milkdrop_only.visualizer_fps, 60,
+            "MilkDrop's rate is its own"
+        );
     }
 
     #[test]
@@ -1570,14 +1648,17 @@ impl SessionState {
             .unwrap_or_default()
     }
 
+    /// The session as its file holds it.
+    pub fn encode(&self) -> Option<String> {
+        serde_json::to_string(self)
+            .map_err(|error| log::warn!("unable to encode session: {error}"))
+            .ok()
+    }
+
+    /// Writes the session and waits for the disk. The app saves through
+    /// its [`fastframe_file::Writer`] instead.
     pub fn save(&self, path: &Path) {
-        let text = match serde_json::to_string(self) {
-            Ok(text) => text,
-            Err(error) => {
-                log::warn!("unable to encode session: {error}");
-                return;
-            }
-        };
+        let Some(text) = self.encode() else { return };
         if let Err(error) = fastframe_file::write(path, text) {
             log::warn!("unable to save session to {}: {error}", path.display());
         }

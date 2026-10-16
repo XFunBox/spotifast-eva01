@@ -22,7 +22,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
@@ -64,6 +64,10 @@ pub const WEB_SCOPES: &[&str] = &[
 const AUTHORIZE_URL: &str = "https://accounts.spotify.com/authorize";
 const TOKEN_URL: &str = "https://accounts.spotify.com/api/token";
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// A browser sends its request line at once; anything slower or longer is
+/// not the redirect, and must not hold the listener while the user waits.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+const REQUEST_LINE_LIMIT: u64 = 8 * 1024;
 /// Refresh this long before the access token expires.
 const REFRESH_MARGIN: Duration = Duration::from_secs(90);
 
@@ -156,18 +160,6 @@ pub struct TokenResponse {
     pub scope: Option<String>,
 }
 
-/// Listens for Spotify's redirect and returns the authorization code.
-///
-/// Ends early when `cancel` flips to true (the user gave up) or after ten
-/// minutes.
-pub async fn wait_for_code(
-    port: u16,
-    expected_state: &str,
-    cancel: watch::Receiver<bool>,
-) -> Result<String> {
-    wait_for_code_on_listener(listen_for_redirect(port)?, expected_state, cancel).await
-}
-
 /// Reserve the callback port before offering or opening browser sign-in.
 pub fn listen_for_redirect(port: u16) -> Result<TcpListener> {
     let address: SocketAddr = ([127, 0, 0, 1], port).into();
@@ -178,6 +170,11 @@ pub fn listen_for_redirect(port: u16) -> Result<TcpListener> {
     Ok(TcpListener::from_std(listener)?)
 }
 
+/// Listens on a reserved port for Spotify's redirect and returns the
+/// authorization code.
+///
+/// Ends early when `cancel` flips to true (the user gave up) or after ten
+/// minutes.
 pub async fn wait_for_code_on_listener(
     listener: TcpListener,
     expected_state: &str,
@@ -196,10 +193,11 @@ pub async fn wait_for_code_on_listener(
             _ = &mut deadline => bail!("sign-in timed out; try again"),
         };
 
-        let mut reader = BufReader::new(&mut stream);
+        let mut reader = BufReader::new(&mut stream).take(REQUEST_LINE_LIMIT);
         let mut request_line = String::new();
-        if reader.read_line(&mut request_line).await.is_err() {
-            continue;
+        match tokio::time::timeout(REQUEST_TIMEOUT, reader.read_line(&mut request_line)).await {
+            Ok(Ok(_)) if request_line.ends_with('\n') => {}
+            _ => continue,
         }
         let outcome = parse_request_line(&request_line, expected_state);
         let (status, body) = match &outcome {
@@ -559,6 +557,32 @@ mod tests {
             .unwrap();
         assert_eq!(code, "test-code");
         drop(cancel);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_stalled_or_endless_request_does_not_hold_the_redirect_listener() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mut stalled = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
+        stalled.write_all(b"GET /login?code=").await.unwrap();
+        let mut endless = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
+        endless.write_all(&[b'a'; 16 * 1024]).await.unwrap();
+        let mut browser = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
+        browser
+            .write_all(b"GET /login?code=test-code&state=state HTTP/1.1\r\n\r\n")
+            .await
+            .unwrap();
+        let (_cancel, receiver) = watch::channel(false);
+        let code = wait_for_code_on_listener(listener, "state", receiver)
+            .await
+            .unwrap();
+        assert_eq!(code, "test-code");
     }
 
     #[test]

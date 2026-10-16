@@ -118,7 +118,8 @@ def install(root=None, theme='EVA-01', skip_download=False, dry_run=False):
     arch = {'x86_64': 'x86_64', 'amd64': 'x86_64', 'aarch64': 'aarch64', 'arm64': 'aarch64'}.get(machine)
     if not arch:
         raise ValueError(f'Arquitectura no soportada: {machine}')
-    entry = read_json(HERE / 'release-lock.json')['downloads']['linux-' + arch]
+    release = read_json(HERE / 'release-lock.json')
+    entry = release['downloads']['linux-' + arch]
     updates = {'theme': 'dark', 'custom_theme': theme + '.json', 'accent_from_art': False,
                'custom_titlebar': True, 'language': 'es', 'skin': 'EVA-01.wsz',
                'random_skin': False, 'skin_scale': 3, 'winamp_window': False,
@@ -130,7 +131,7 @@ def install(root=None, theme='EVA-01', skip_download=False, dry_run=False):
         if not (ASSETS / filename).is_file():
             raise ValueError(f'Falta recurso: {filename}')
     if dry_run:
-        print(f'Simulación: Spotifast 0.13.0, {arch}, tema {theme}, perfil {paths["home"]}')
+        print(f'Simulación: Spotifast {release["version"]}, {arch}, tema {theme}, perfil {paths["home"]}')
         return
     if skip_download and not binary.is_file():
         raise ValueError('--skip-download necesita un AppImage ya instalado en la ruta de destino.')

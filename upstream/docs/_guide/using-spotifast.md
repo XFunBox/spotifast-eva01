@@ -239,6 +239,7 @@ Winamp skins do not yet have equivalent accessibility coverage.
 | `B` | Like or unlike the playing song |
 | `S` / `R` | Shuffle / cycle repeat |
 | `Q` | Queue panel |
+| `F` | Enter or leave full screen lyrics |
 | `Ctrl+F` or `/` | Search |
 | `Ctrl+B` | Show or hide the sidebar |
 | `Alt+←` / `Alt+→` | Back or forward |
@@ -344,6 +345,8 @@ dates come last.
 **Spotify custom order** follows your playlist order and folders from Spotify.
 Set up playback on this computer to load that order. Your playlists stay
 visible while it loads, and Spotifast remembers the last order for your account.
+When you rearrange your library in another Spotify app, Spotifast picks up the
+new order when you switch back to it.
 Items you pin in Spotifast remain at the top, including items from a closed
 folder. Sorting or dragging Library items changes their order only in
 Spotifast; it does not rearrange your Spotify library.
@@ -377,10 +380,14 @@ to treble with peaks that hang and fall, and **Waveform** draws the sound's
 wave as a glowing line, both in colours drawn from the cover. It follows the equalizer, not the volume, and moves only while the
 song plays on this computer. It is off by default. Clicking the player
 bar's empty space switches it, as Winamp's visualizer did: off, then
-Spectrum, then Waveform, then off again. The visualizers draw at half their
-rate while Spotifast's window is out of focus or the system saves energy, and
-not at all while nobody can see the window: minimised, in the tray, with the
-display off or the screen locked. Disable **Click player bar to change
+Spectrum, then Waveform, then off again. **Frame rate** in **Settings >
+Appearance** sets how often it and the mini player's analyser draw: 30, 60
+(the default), the rate of the screen showing the window, or Uncapped,
+which follows the display. They draw at half that rate while Spotifast's
+window is out of focus, at most 30 frames a second while the system saves
+energy, and not at all while nobody can see the window: minimised, in the
+tray, with the display off or the screen locked. MilkDrop has its own frame
+rate. Disable **Click player bar to change
 visualizer** in **Settings > Appearance** to prevent accidental changes.
 
 Spotifast follows the system when it asks for less motion: **Animation
@@ -500,8 +507,12 @@ snap the window, and drag a window edge or corner to resize it.
 ## Google Cast playback
 
 Google Cast speakers and speaker groups appear in the device picker. Enable
-local playback first, then select the speaker. Spotifast starts Spotify on it,
-and the speaker then plays like any other Spotify Connect device.
+local playback first, then select the speaker. Since 0.13.1, Spotifast first
+checks that the speaker is a genuine Google Cast device, as Chrome does (0.13.0
+did not), then starts Spotify on
+it, and the speaker plays like any other Spotify Connect device. A device that
+fails the check gets nothing, and Spotifast says it could not prove it is
+genuine.
 
 ## Radio
 
@@ -551,8 +562,9 @@ Choose the microphone button in the player bar, or press **L**, to open lyrics.
 Synced lyrics follow the playing line automatically. Scroll to pause following,
 choose **Follow** to resume it, or choose a line to jump to that part of the song.
 
-The expand button opens lyrics in full screen. Press **Esc** or choose the
-shrink button to return to your previous window size. Full-screen lyrics
+The expand button, or **F** when no text field has focus, opens lyrics in
+full screen. Press **F** or **Esc**, or choose the shrink button, to return to
+your previous window size. Full-screen lyrics
 scroll smoothly and highlight the playing line automatically. Scrolling by
 hand pauses following; choose **Follow** to resume. Since 0.11.0, a wide
 window shows the song's cover beside the lyrics, the two centred together,

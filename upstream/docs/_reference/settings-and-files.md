@@ -57,6 +57,12 @@ KWallet to remember a new sign-in. Flatpak is allowed to talk to
 produces an error without blocking the interface. A new sign-in can still be
 used for this session, with no new plaintext fallback file.
 
+On Windows, grants are saved with Enterprise persistence, which survives a
+restart. Since 0.13.2, if Credential Manager refuses that, or keeps the grant
+only until you sign out of Windows, Spotifast saves it again with Local
+persistence, which also survives a restart. Failures are logged with their
+Windows error code, never with the grant.
+
 On upgrade, each legacy grant is written to the protected store and read back
 before its old file is removed. Valid grants migrate without signing in again.
 If Spotify rejects a saved refresh grant, only that grant is forgotten so the
@@ -264,6 +270,7 @@ main fields are:
 | `accent_from_art` | `true` | Tint pages with album art |
 | `player_bar_vis` | `off` | Since 0.11.0: what moves behind the player bar while a song plays on this computer: `off`, `spectrum` or `waveform` |
 | `player_bar_vis_click` | `true` | Allow clicks on empty player bar space to cycle visualizer modes |
+| `visualizer_fps` | `60` | Frame rate of the player bar and mini player visualizers; `0` is uncapped. Half that out of focus, at most 30 while the system saves energy, none while the window is hidden. MilkDrop uses `milkdrop_fps` |
 | `library_sort` | `{}` | Per-section Library order overrides, since 0.8.0: `library`, `recently_played`, `name`, `recently_added`, `local`, or `spotify`, where supported |
 | `library_by_you` | `false` | Show only playlists owned by the signed-in account, alongside Liked Songs; applies only to the Playlists shelf |
 | `sidebar_order` | `[]` | Saved local playlist arrangement, including an unpinned Liked Songs, retained when another sort is selected |
@@ -294,7 +301,7 @@ main fields are:
 | `milkdrop_open` | `false` | The MilkDrop window is open |
 | `milkdrop_seconds` | `30` | How long each MilkDrop preset plays |
 | `milkdrop_fps` | `60` | MilkDrop frame rate; `0` is uncapped. At most 30 while the system saves energy |
-| `milkdrop_screen_hz` | `0` | Last reported display refresh rate |
+| `milkdrop_screen_hz` | `0` | Last refresh rate reported by MilkDrop's window |
 | `milkdrop_fullscreen` | `false` | The MilkDrop window fills the screen |
 | `milkdrop_size` | `640, 480` | The MilkDrop window's size in points |
 | `keep_playing_in_background` | `true` | Close to tray |
@@ -452,8 +459,13 @@ For example, `themes/gruvbox.json`:
 `base` is `dark` (the default) or `light`. Omitted colors inherit that palette.
 Supported colors are `window`, `panel`, `surface`, `surface_hover`,
 `surface_active`, `outline`, `text`, `secondary`, `dim`, `accent`,
-`accent_hover`, `on_accent`, `danger`, `warning`, `overlay`, and `shadow`.
-Values must be `#RRGGBB` or `#RRGGBBAA`.
+`accent_hover`, `on_accent`, `danger`, `warning`, `overlay`, `shadow`, and
+`tint`. Values must be `#RRGGBB` or `#RRGGBBAA`.
+
+`tint` is the colour the top of a page fades from when album art does not
+colour it: with **Colour from album art** off, or on a page without a cover.
+Its alpha is the strength, so `#00000018` is a faint dark wash and `#ffffff20`
+a faint light one. Leave it out for a plain page.
 
 Files are read in the background at launch and when `spotifast reload-themes`
 is called. The command updates the selected palette without interrupting

@@ -13,6 +13,8 @@ This reduces the work each frame needs for large libraries while preserving
 your chosen sort, pins, and folders.
 
 The main window draws as needed and uses the platform's frame pacing. The
+player bar and mini player visualizers draw at the **Frame rate** chosen in
+Settings > Appearance, 60 by default; a lower rate uses less power. The
 MilkDrop frame-rate setting applies to its separate visualizer window.
 
 ## API rate limits

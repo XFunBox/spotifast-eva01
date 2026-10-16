@@ -77,6 +77,15 @@ repositories under `https://github.com/crmne/`: flag any `git` dependency,
 anywhere else, and call out every added or changed git source, even a `crmne`
 one, because it needs the maintainer's explicit approval.
 
+New settings are a blocker as well. A pull request must not add a setting (a
+field in a `Settings` struct in `src/settings.rs`, a toggle, a slider, an
+option) unless the maintainer approved it in the linked issue first. Ask for a
+good default, a keyboard shortcut or a command instead, and ask the author to
+remove the setting. CI fails on a new `Settings` field until the maintainer
+adds the `setting-approved` label. When triaging a feature request that asks
+for a new option, leave that decision to the maintainer and do not suggest a
+setting yourself.
+
 Start every review by stating `User-visible UI impact: none` or by listing the
 visible changes. Treat changes to navigation, control placement, menu grouping,
 the application shell, window chrome, panel sizing, responsive breakpoints,

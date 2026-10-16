@@ -17,5 +17,6 @@ here; do not commit them.
 - [ ] I ran formatting, Clippy, and the relevant tests locally.
 - [ ] I updated documentation for user-visible behaviour, settings, files, or network access.
 - [ ] Screenshots, captures, and recordings are attached here, not committed.
+- [ ] This adds no setting, or the maintainer approved it in the linked issue (see "Settings" in `CONTRIBUTING.md`).
 - [ ] Dependencies come from crates.io or `github.com/crmne` repositories, and the maintainer approved any added or changed git source.
 - [ ] I understand and take responsibility for every submitted line, including AI-assisted code.

@@ -32,6 +32,10 @@ pub struct Palette {
     pub warning: Color32,
     pub overlay: Color32,
     pub shadow: Color32,
+    /// The colour a page's header fades from when album art does not tint
+    /// it; its alpha is the strength. Transparent leaves the plain window.
+    #[serde(default)]
+    pub tint: Color32,
 }
 
 impl Palette {
@@ -54,6 +58,7 @@ impl Palette {
             warning: Color32::from_rgb(0xf2, 0xb8, 0x5c),
             overlay: Color32::from_rgb(0x22, 0x27, 0x2e),
             shadow: Color32::from_black_alpha(140),
+            tint: Color32::TRANSPARENT,
         }
     }
 
@@ -76,6 +81,7 @@ impl Palette {
             warning: Color32::from_rgb(0xb8, 0x7a, 0x14),
             overlay: Color32::from_rgb(0xff, 0xff, 0xff),
             shadow: Color32::from_black_alpha(50),
+            tint: Color32::TRANSPARENT,
         }
     }
 
@@ -126,6 +132,7 @@ impl fastframe_theme::Palette for Palette {
             "warning" => self.warning = color,
             "overlay" => self.overlay = color,
             "shadow" => self.shadow = color,
+            "tint" => self.tint = color,
             _ => return false,
         }
         true
@@ -202,7 +209,7 @@ pub const CUSTOM_TOP_BAR_HEIGHT: f32 = 48.0;
 /// Keep the custom Windows header close to its 36-point caption controls.
 /// Linux's custom title bar keeps the ordinary height.
 pub fn top_bar_height() -> f32 {
-    if cfg!(windows) && crate::window::custom_titlebar() {
+    if cfg!(windows) && fastframe_titlebar::enabled() {
         CUSTOM_TOP_BAR_HEIGHT
     } else {
         TOP_BAR_HEIGHT
@@ -259,6 +266,7 @@ pub fn install(ctx: &egui::Context) {
     install_fonts(ctx);
     egui_extras::install_image_loaders(ctx);
     fastframe_icons::install::<Icon>(ctx);
+    fastframe_titlebar::install(ctx);
     // Colour emoji over every text egui draws (see `crate::emoji`).
     ctx.add_plugin(fastframe_emoji::EmojiPlugin::default());
 }
@@ -824,22 +832,55 @@ pub fn repaint_after(ctx: &egui::Context, interval: std::time::Duration) {
     ctx.request_repaint_after(interval + std::time::Duration::from_secs_f32(predicted));
 }
 
-/// How often a moving visualiser is drawn: sixty times a second, as Winamp
-/// drew its analyser.
-const VISUALISER_FRAME: std::time::Duration = std::time::Duration::from_micros(16_667);
-
-/// Asks for a moving visualiser's next frame within `budget`: as designed,
-/// at half rate when out of focus or saving energy, and none when nobody can
-/// see it.
-pub fn visualiser_frame(ctx: &egui::Context, budget: crate::power::Budget) {
-    use crate::power::Budget;
-    match budget {
-        // egui subtracts one predicted frame from delayed repaints; the
-        // display supplies it, through the vsync swap or, on Wayland, the
+/// Asks for a moving visualiser's next frame at `rate` frames a second, from
+/// [`crate::power::visualiser_fps`]: 0 is the display's own rate, and `None`
+/// asks for nothing, since nobody can see it.
+pub fn visualiser_frame(ctx: &egui::Context, rate: Option<u32>) {
+    let Some(rate) = rate else {
+        return;
+    };
+    if rate == 0 {
+        // The display paces it, through the vsync swap or, on Wayland, the
         // compositor's frame callback that eframe waits for.
-        Budget::Normal => ctx.request_repaint_after(VISUALISER_FRAME),
-        Budget::Saver => repaint_after(ctx, VISUALISER_FRAME * 2),
-        Budget::Background => {}
+        ctx.request_repaint();
+        return;
+    }
+    let interval = 1.0 / f64::from(rate);
+    let id = egui::Id::new("visualiser-frame-due");
+    let now = ctx.input(|input| input.time);
+    let pass = ctx.cumulative_pass_nr();
+    let (mut due, seen) = ctx
+        .data(|data| data.get_temp::<(f64, u64)>(id))
+        .unwrap_or((now, u64::MAX));
+    // Count each pass once, however many visualisers it draws.
+    if seen != pass {
+        due = next_beat(due, now, interval);
+    }
+    ctx.data_mut(|data| data.insert_temp(id, (due, pass)));
+    let wait = due - now;
+    if wait <= 0.0 {
+        ctx.request_repaint();
+    } else {
+        repaint_after(ctx, std::time::Duration::from_secs_f64(wait));
+    }
+}
+
+/// When the frame after one drawn at `now` is due, when this one was `due`.
+///
+/// Frames are due on a fixed beat, each one interval after the last was due
+/// rather than after it was drawn, so a rate the display does not divide
+/// evenly (60 on a 144 Hz screen) still averages out to the rate asked for,
+/// and a rate equal to the display's does not slip to every other refresh.
+/// A frame up to a millisecond early counts as on time; one drawn before
+/// that (something else asked for it) keeps the beat; and after a pause
+/// the beat starts again from now rather than rushing to catch up.
+fn next_beat(due: f64, now: f64, interval: f64) -> f64 {
+    if now + 0.001 < due {
+        due
+    } else if now - due > interval {
+        now + interval
+    } else {
+        due + interval
     }
 }
 
@@ -978,17 +1019,20 @@ mod tests {
         output.textures_delta.clear();
     }
 
-    /// Palette files name the sixteen colours every app shares, and only
-    /// those: a typo is an invalid file, not an ignored colour.
+    /// Palette files name the sixteen colours every app shares and
+    /// Spotifast's own `tint`, and only those: a typo is an invalid file,
+    /// not an ignored colour.
     #[test]
     fn palette_files_set_every_base_colour() {
         use fastframe_theme::Palette as _;
-        for name in fastframe_theme::BASE_COLORS {
+        for name in fastframe_theme::BASE_COLORS.iter().chain(&["tint"]) {
             let mut palette = Palette::dark();
             assert!(palette.set(name, Color32::from_rgb(1, 2, 3)), "{name}");
             assert_ne!(palette, Palette::dark(), "{name}");
         }
         assert!(!Palette::dark().set("typo", Color32::RED));
+        assert_eq!(Palette::dark().tint, Color32::TRANSPARENT);
+        assert_eq!(Palette::light().tint, Color32::TRANSPARENT);
         let light: Palette =
             fastframe_theme::parse_palette(r##"{"base":"light","colors":{"accent":"#8c3fa5"}}"##)
                 .unwrap();
@@ -1177,9 +1221,55 @@ mod tests {
         ctx.set_request_repaint_callback(move |_| {
             seen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         });
-        visualiser_frame(&ctx, crate::power::Budget::Background);
+        visualiser_frame(&ctx, None);
         assert_eq!(asked.load(std::sync::atomic::Ordering::Relaxed), 0);
-        visualiser_frame(&ctx, crate::power::Budget::Saver);
+        visualiser_frame(&ctx, Some(30));
         assert_eq!(asked.load(std::sync::atomic::Ordering::Relaxed), 1);
+    }
+
+    /// Frames drawn in one second of a display refreshing `hz` times, when
+    /// the visualiser asks for `rate`: each frame lands on the first refresh
+    /// at or after it is due.
+    fn frames_in_a_second(hz: u32, rate: u32) -> u32 {
+        let refresh = 1.0 / f64::from(hz);
+        let interval = 1.0 / f64::from(rate);
+        let mut due = 0.0;
+        let mut drawn = 0;
+        for tick in 0..hz {
+            let now = f64::from(tick) * refresh;
+            if now + 0.001 >= due {
+                drawn += 1;
+                due = next_beat(due, now, interval);
+            }
+        }
+        drawn
+    }
+
+    /// The beat holds the rate asked for whether or not the display divides
+    /// it, and a rate equal to the display's draws every refresh.
+    #[test]
+    fn the_visualiser_keeps_its_beat_on_any_display() {
+        assert_eq!(frames_in_a_second(144, 144), 144, "no slipped refreshes");
+        assert_eq!(frames_in_a_second(60, 60), 60);
+        assert_eq!(frames_in_a_second(144, 72), 72);
+        let sixty = frames_in_a_second(144, 60);
+        assert!((59..=61).contains(&sixty), "60 on 144 Hz drew {sixty}");
+        let thirty = frames_in_a_second(165, 30);
+        assert!((29..=31).contains(&thirty), "30 on 165 Hz drew {thirty}");
+        assert_eq!(frames_in_a_second(60, 144), 60, "never above the display");
+    }
+
+    /// A frame something else asked for keeps the beat, and a pause starts
+    /// it again from now instead of rushing frames to catch up.
+    #[test]
+    fn the_visualiser_beat_ignores_extra_frames_and_restarts_after_a_pause() {
+        let interval = 1.0 / 60.0;
+        assert_eq!(next_beat(1.0, 0.99, interval), 1.0, "early frame");
+        assert_eq!(next_beat(1.0, 1.0, interval), 1.0 + interval);
+        assert_eq!(
+            next_beat(1.0, 5.0, interval),
+            5.0 + interval,
+            "after a pause"
+        );
     }
 }

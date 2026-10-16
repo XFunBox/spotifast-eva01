@@ -25,7 +25,8 @@ framework behind a family of native desktop apps. It plays music through
 [librespot](https://github.com/librespot-org/librespot), typically uses
 100–250 MB of RAM, starts in well under a second, and has no browser engine.
 
-The interface includes complete Spanish, Turkish, and Ukrainian translations.
+The interface includes complete
+[translations for all supported languages](docs/_reference/translating.md#languages-and-coverage).
 
 **Playback needs Spotify Premium.** Free accounts can browse and search, but
 cannot play music through Spotifast.

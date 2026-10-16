@@ -13,6 +13,8 @@ These instructions add implementation constraints for coding agents.
   lawful support first lands upstream.
 - Do not broaden a task into adjacent features or a general refactor. Preserve
   existing user behaviour unless the task explicitly changes it.
+- Do not add a setting without the maintainer's approval in the issue first;
+  prefer a good default, a shortcut or a command (`CONTRIBUTING.md`, Settings).
 
 ## Architecture
 
@@ -21,6 +23,9 @@ These instructions add implementation constraints for coding agents.
 - Network and playback work belongs on the runtime in `src/backend.rs` or in
   the player engine in `src/player.rs`, never as blocking work on the UI
   thread.
+- File writes that wait for the disk (anything through `fastframe_file`)
+  never run on the UI thread: encode there and hand the bytes to the app's
+  `fastframe_file::Writer`. fastframe_file's guard panics in debug builds.
 - Keep platform integrations behind target-specific modules or `cfg` blocks.
   A fix for one platform must keep the other two targets compiling.
 - Settings and state files must remain readable, backward compatible, and

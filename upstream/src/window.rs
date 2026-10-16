@@ -13,25 +13,64 @@ pub fn on_top_unavailable(locale: crate::i18n::Locale) -> std::borrow::Cow<'stat
     )
 }
 
-/// Says why no window opened on Windows on ARM and offers the fix.
+/// The message box shown when eframe could not create an OpenGL context on
+/// Windows, and the page its Yes button opens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingOpenGl {
+    pub title: String,
+    pub text: String,
+    pub page: &'static str,
+}
+
+/// The Store page of the OpenCL, OpenGL & Vulkan Compatibility Pack.
+const COMPATIBILITY_PACK_PAGE: &str = "ms-windows-store://pdp/?ProductId=9NQPSL29BFFF";
+/// The download guide, which documents the OpenGL 2.0 requirement.
+const DOWNLOAD_PAGE: &str = "https://spotifast.rocks/download/";
+
+/// Says why no window opened and where the fix is.
 ///
 /// Snapdragon graphics drivers have no OpenGL of their own. Windows provides
 /// it on ARM through Microsoft's compatibility pack, a Store app that
-/// translates it to Direct3D 12, so a missing or broken pack leaves eframe
-/// without a context and the app would otherwise close without a word.
-#[cfg(all(windows, target_arch = "aarch64"))]
-pub fn report_missing_opengl(locale: crate::i18n::Locale) {
+/// translates it to Direct3D 12, so ARM points at that pack. Elsewhere the
+/// usual cause is a virtual machine or remote session with only the
+/// Microsoft Basic Display Adapter, which offers OpenGL 1.1.
+pub fn missing_opengl_message(locale: crate::i18n::Locale, arm: bool) -> MissingOpenGl {
     use crate::i18n::gettext;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{IDYES, MB_ICONERROR, MB_YESNO, MessageBoxW};
-    /// The Store page of the OpenCL, OpenGL & Vulkan Compatibility Pack.
-    const STORE_PAGE: &str = "ms-windows-store://pdp/?ProductId=9NQPSL29BFFF";
-
-    let wide = |text: &str| text.encode_utf16().chain([0]).collect::<Vec<u16>>();
-    let title = wide(&gettext(locale, "Spotifast cannot open its window"));
-    let text = wide(&gettext(
+    let title = gettext(locale, "Spotifast cannot open its window").into_owned();
+    if arm {
+        return MissingOpenGl {
+            title,
+            text: gettext(
+                locale,
+                "On Windows on ARM, the OpenGL that Spotifast draws with comes from Microsoft's OpenCL, OpenGL & Vulkan Compatibility Pack. Open its Microsoft Store page to install or repair it?",
+            )
+            .into_owned(),
+            page: COMPATIBILITY_PACK_PAGE,
+        };
+    }
+    let text = gettext(
         locale,
-        "On Windows on ARM, the OpenGL that Spotifast draws with comes from Microsoft's OpenCL, OpenGL & Vulkan Compatibility Pack. Open its Microsoft Store page to install or repair it?",
-    ));
+        // Translators: Keep {url} exactly as written. It becomes the address
+        // of the Spotifast download page.
+        "Spotifast needs a graphics driver with OpenGL 2.0 or newer, and this PC or virtual machine does not provide one. Install the graphics driver, or turn on GPU acceleration for the virtual machine. Open {url} to read more?",
+    );
+    MissingOpenGl {
+        title,
+        text: text.replace("{url}", DOWNLOAD_PAGE),
+        page: DOWNLOAD_PAGE,
+    }
+}
+
+/// Shows [`missing_opengl_message`] and opens its page on Yes, so a missing
+/// OpenGL does not close the app without a word.
+#[cfg(windows)]
+pub fn report_missing_opengl(locale: crate::i18n::Locale) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{IDYES, MB_ICONERROR, MB_YESNO, MessageBoxW};
+
+    let message = missing_opengl_message(locale, cfg!(target_arch = "aarch64"));
+    let wide = |text: &str| text.encode_utf16().chain([0]).collect::<Vec<u16>>();
+    let title = wide(&message.title);
+    let text = wide(&message.text);
     // SAFETY: both strings are NUL-terminated UTF-16 that outlive the call,
     // and the box has no owner window.
     let answer = unsafe {
@@ -43,56 +82,10 @@ pub fn report_missing_opengl(locale: crate::i18n::Locale) {
         )
     };
     if answer == IDYES
-        && let Err(error) = open::that(STORE_PAGE)
+        && let Err(error) = open::that(message.page)
     {
-        log::warn!("cannot open the Microsoft Store: {error}");
+        log::warn!("cannot open {}: {error}", message.page);
     }
-}
-
-/// Handles a macOS title-bar double-click, or leaves a first click to drag.
-#[cfg(target_os = "macos")]
-pub fn macos_titlebar_should_drag() -> bool {
-    use fastframe_macos::DoubleClick;
-    use objc2::{MainThreadMarker, sel};
-    use objc2_app_kit::{NSApplication, NSEventType};
-    use objc2_foundation::NSObjectNSDelayedPerforming;
-
-    let Some(mtm) = MainThreadMarker::new() else {
-        return true;
-    };
-    let app = NSApplication::sharedApplication(mtm);
-    let Some(event) = app.currentEvent() else {
-        return true;
-    };
-    if event.r#type() != NSEventType::LeftMouseDown || event.clickCount() != 2 {
-        return true;
-    }
-
-    if let Some(window) = event.window(mtm) {
-        // Let egui finish this frame before AppKit starts resizing the window.
-        // SAFETY: Both NSWindow selectors take one optional sender argument.
-        unsafe {
-            match fastframe_macos::double_click_action() {
-                // AppKit already fills the screen as part of the native
-                // window drag.
-                DoubleClick::Fill | DoubleClick::Nothing => {}
-                DoubleClick::Minimize => window.performSelector_withObject_afterDelay(
-                    sel!(performMiniaturize:),
-                    None,
-                    0.0,
-                ),
-                DoubleClick::Zoom => {
-                    window.performSelector_withObject_afterDelay(sel!(performZoom:), None, 0.0)
-                }
-            }
-        }
-    }
-    false
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn macos_titlebar_should_drag() -> bool {
-    true
 }
 
 /// Minimize the active window without leaving egui's macOS viewport flag stale
@@ -233,179 +226,23 @@ pub fn set_fixed_size(on: bool) {
     FIXED_SIZE.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// A title-bar action.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WindowButton {
-    Minimize,
-    Maximize,
-    Close,
-}
-
-#[cfg(target_os = "linux")]
-pub struct LinuxWindowControls {
-    pub left: Vec<WindowButton>,
-    pub right: Vec<WindowButton>,
-}
-
-#[cfg(target_os = "linux")]
-static LINUX_CONTROLS: std::sync::OnceLock<LinuxWindowControls> = std::sync::OnceLock::new();
-
-#[cfg(target_os = "linux")]
-pub(crate) static LINUX_ICONS: std::sync::OnceLock<[Option<Vec<u8>>; 4]> =
-    std::sync::OnceLock::new();
-
-/// Read desktop preferences at startup, before any UI is drawn. They come
-/// through the desktop portal, which answers inside a Flatpak too, and each
-/// read gives up after about a second. No GTK dependency or desktop
-/// subprocess is needed while rendering a frame.
-#[cfg(target_os = "linux")]
-pub fn init_linux_window_controls() {
-    LINUX_CONTROLS.get_or_init(|| {
-        if fastframe_desktop::is_gnome() {
-            let layout =
-                fastframe_desktop::setting("org.gnome.desktop.wm.preferences", "button-layout")
-                    .and_then(|layout| parse_linux_controls(&layout))
-                    .filter(|controls| !controls.left.is_empty() || !controls.right.is_empty());
-            layout.unwrap_or_else(|| parse_linux_controls(":close").unwrap())
-        } else {
-            parse_linux_controls(":minimize,maximize,close").unwrap()
-        }
-    });
-    LINUX_ICONS.get_or_init(|| {
-        let theme = fastframe_desktop::setting("org.gnome.desktop.interface", "icon-theme")
-            .map(|theme| theme.trim().trim_matches('\'').to_owned())
-            .filter(|theme| !theme.contains('/') && theme != "." && theme != "..")
-            .unwrap_or_else(|| "Adwaita".into());
-        let mut roots = Vec::new();
-        if let Some(dirs) = directories::BaseDirs::new() {
-            roots.push(dirs.data_dir().join("icons"));
-            roots.push(dirs.home_dir().join(".icons"));
-        }
-        roots.extend(
-            std::env::split_paths(
-                &std::env::var_os("XDG_DATA_DIRS")
-                    .unwrap_or_else(|| "/usr/local/share:/usr/share".into()),
-            )
-            .map(|root| root.join("icons")),
-        );
-        [
-            "window-minimize-symbolic",
-            "window-maximize-symbolic",
-            "window-close-symbolic",
-            "window-restore-symbolic",
-        ]
-        .map(|name| {
-            for theme in [theme.as_str(), "Adwaita"] {
-                for root in &roots {
-                    for folder in [
-                        "symbolic/ui",
-                        "symbolic/actions",
-                        "scalable/actions",
-                        "16x16/actions",
-                    ] {
-                        if let Ok(svg) = std::fs::read_to_string(
-                            root.join(theme).join(folder).join(format!("{name}.svg")),
-                        ) && svg.contains("</svg>")
-                        {
-                            // SVG loaders do not apply GTK's symbolic colour palette.
-                            // Set monochrome fills to white so egui can tint them.
-                            let fill = concat!(
-                                "<style>path,rect,circle,ellipse,polygon,polyline",
-                                " { fill: white !important; }</style></svg>",
-                            );
-                            return Some(svg.replace("</svg>", fill).into_bytes());
-                        }
-                    }
-                }
-            }
-            None
-        })
-    });
-}
-
-#[cfg(target_os = "linux")]
-pub fn linux_window_controls() -> &'static LinuxWindowControls {
-    LINUX_CONTROLS.get_or_init(|| parse_linux_controls(":minimize,maximize,close").unwrap())
-}
-
-#[cfg(target_os = "linux")]
-fn parse_linux_controls(layout: &str) -> Option<LinuxWindowControls> {
-    use WindowButton::*;
-    let layout = layout.trim().trim_matches('\'');
-    let (left, right) = layout.split_once(':')?;
-    let mut seen = Vec::new();
-    let mut buttons = |side: &str| {
-        side.split(',')
-            .filter_map(|name| match name.trim() {
-                "minimize" => Some(Minimize),
-                "maximize" => Some(Maximize),
-                "close" => Some(Close),
-                _ => None,
-            })
-            .filter(|button| {
-                if seen.contains(button) {
-                    false
-                } else {
-                    seen.push(*button);
-                    true
-                }
-            })
-            .collect()
-    };
-    Some(LinuxWindowControls {
-        left: buttons(left),
-        right: buttons(right),
-    })
-}
-
-static CUSTOM_TITLEBAR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// Whether the main window draws its own title bar and window buttons
-/// instead of the platform's frame. Windows and Linux offer the choice, and it
-/// is off unless the listener turns it on in Settings.
-pub fn custom_titlebar() -> bool {
-    custom_titlebar_for(
-        cfg!(any(windows, target_os = "linux")),
-        CUSTOM_TITLEBAR.load(std::sync::atomic::Ordering::Relaxed),
-    )
-}
-
-/// Sets the title bar choice the next main window is created with.
-pub fn set_custom_titlebar(on: bool) {
-    CUSTOM_TITLEBAR.store(on, std::sync::atomic::Ordering::Relaxed);
-}
-
-const fn custom_titlebar_for(supported: bool, chosen: bool) -> bool {
-    supported && chosen
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// The portal gives GNOME's button layout as a plain string, where
-    /// gsettings quoted it; both read the same, and a side may be empty.
-    #[cfg(target_os = "linux")]
     #[test]
-    fn gnome_button_layouts_read_with_or_without_quotes() {
-        use WindowButton::*;
-        for layout in ["appmenu:minimize,close", "'appmenu:minimize,close'\n"] {
-            let controls = parse_linux_controls(layout).unwrap();
-            assert!(controls.left.is_empty());
-            assert_eq!(controls.right, [Minimize, Close]);
-        }
-        let controls = parse_linux_controls("close,maximize,close:").unwrap();
-        assert_eq!(controls.left, [Close, Maximize], "each button once");
-        assert!(controls.right.is_empty());
-        assert!(parse_linux_controls("close").is_none(), "no side marker");
-    }
+    fn missing_opengl_points_arm_at_the_store_pack_and_others_at_the_guide() {
+        let arm = missing_opengl_message(crate::i18n::Locale::English, true);
+        assert_eq!(arm.page, COMPATIBILITY_PACK_PAGE);
+        assert!(arm.text.contains("Compatibility Pack"));
 
-    #[test]
-    fn supported_platforms_draw_the_custom_title_bar_only_when_chosen() {
-        assert!(custom_titlebar_for(true, true));
-        assert!(!custom_titlebar_for(true, false));
-        assert!(!custom_titlebar_for(false, true));
-        assert!(!custom_titlebar_for(false, false));
+        let x64 = missing_opengl_message(crate::i18n::Locale::English, false);
+        assert_eq!(x64.title, "Spotifast cannot open its window");
+        assert_eq!(x64.page, "https://spotifast.rocks/download/");
+        assert!(x64.text.contains("OpenGL 2.0"));
+        assert!(x64.text.contains("virtual machine"));
+        assert!(x64.text.contains("https://spotifast.rocks/download/"));
+        assert!(!x64.text.contains("{url}"));
     }
 
     #[test]
