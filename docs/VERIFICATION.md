@@ -22,3 +22,5 @@ El snapshot de 353 archivos coincide con los blobs y modos del árbol Git oficia
 Ocho regresiones del instalador Linux y siete de Nightshift correctas; Bash y revisión de espacios correctos. La CI verifica Windows PowerShell 5.1 y el binario Windows x86_64 además de Linux. Consultar Actions para el resultado del commit publicado. No se recompila ni modifica el motor Rust oficial incluido.
 
 En KDE real, AppImage y runtime Nightshift 0.14.2 comprobados, con arranque real del reproductor, CLI local y MPRIS. Preferencias y recursos anteriores conservados, sin reproducir música durante la prueba. No se ha probado audio autenticado Windows ni hardware ARM64.
+
+La primera comprobación de 0.14.2 en CI detectó que faltaba libpipewire en el runner Linux, nueva dependencia oficial desde 0.14.0. Se añadió `libpipewire-0.3-0t64` a la preparación de CI y a los requisitos Ubuntu del README; se mantiene la comprobación real de arranque. Windows completó instalación y comprobación de versión.

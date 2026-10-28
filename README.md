@@ -11,7 +11,7 @@ Cierra Spotifast antes de instalar. Necesitas Python 3.9 o posterior, conexión 
 En Ubuntu 24.04, si faltan las bibliotecas de escritorio/audio:
 
 ```bash
-sudo apt install python3 libdbus-1-3 libx11-xcb1 libpulse0 libasound2t64 libfuse2t64 libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 libwayland-cursor0 libwayland-egl1 libgl1 libegl1 libx11-6 libxcursor1 libxi6 libxrandr2
+sudo apt install python3 libdbus-1-3 libx11-xcb1 libpulse0 libasound2t64 libpipewire-0.3-0t64 libfuse2t64 libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 libwayland-cursor0 libwayland-egl1 libgl1 libegl1 libx11-6 libxcursor1 libxi6 libxrandr2
 ```
 
 ```bash

@@ -14,7 +14,7 @@ El manifiesto `eva/release-lock.json` fija Spotifast 0.14.2, commit de fuente, U
 - Acceso en `$XDG_DATA_HOME/applications/`, usando `~/.local/share` como alternativa.
 - Copia visual en `$XDG_DATA_HOME/eva-01-audio/apariencia-anterior.json`.
 
-El AppImage oficial necesita las bibliotecas del sistema indicadas en `upstream/native-packages.yaml`; la lista Ubuntu está en el README. El instalador no ejecuta apt ni cambia paquetes del sistema.
+El AppImage oficial necesita las bibliotecas del sistema indicadas en `upstream/native-packages.yaml`; la lista Ubuntu está en el README. Desde Spotifast 0.14.0 se necesita libpipewire 0.3.53 o posterior incluso al usar PulseAudio o ALSA. En Ubuntu 24.04 corresponde a `libpipewire-0.3-0t64`. El instalador no ejecuta apt ni cambia paquetes del sistema.
 
 La instalación requiere que Spotifast esté cerrado. Detecta el ejecutable nativo incluso cuando el AppImage muestra el nombre `AppRun`. No mata procesos automáticamente.
 
