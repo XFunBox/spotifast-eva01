@@ -1,6 +1,6 @@
 # EVA-01 Audio · Spotifast
 
-Spotifast 0.13.3 con temas Evangelion, skin NERV e instaladores para Linux y Windows. Incluye el código original en `upstream/`, sin modificaciones al motor de audio, y conserva su licencia MIT y autoría.
+Spotifast 0.14.2 con temas Evangelion, skin NERV e instaladores para Linux y Windows. Incluye el código original en `upstream/`, sin modificaciones al motor de audio, y conserva su licencia MIT y autoría.
 
 ![Vista previa de la skin compacta](eva/assets/EVA-01-preview.png)
 
@@ -44,7 +44,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\eva\install-windows.ps
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\eva\restore-windows.ps1
 ```
 
-El repositorio es público. Puedes clonar el código o descargar el ZIP de [EVA-01 Audio v1.1.0](https://github.com/XFunBox/spotifast-eva01/releases/tag/v1.1.0), que incluye Spotifast 0.13.3 y NERV Nightshift. La entrega incluye `SHA256SUMS.txt` para verificar el paquete; los instaladores obtienen el reproductor oficial y comprueban su SHA-256.
+El repositorio es público. Puedes clonar el código o descargar el ZIP de [EVA-01 Audio v1.2.0](https://github.com/XFunBox/spotifast-eva01/releases/tag/v1.2.0), que incluye Spotifast 0.14.2 y NERV Nightshift. La entrega incluye `SHA256SUMS.txt` para verificar el paquete; los instaladores obtienen el reproductor oficial y comprueban su SHA-256.
 
 ## Temas y controles
 
@@ -56,7 +56,7 @@ verde neón, carátula y controles para trabajar. Instalación y atajos en
 - **EVA-01 Terminal**: negro verdoso y verde vivo.
 - **EVA-01.wsz**: skin clásica completa, 15 hojas de sprites, títulos de consola NERV y ecualizador AT FIELD.
 
-**Ctrl + M** alterna biblioteca y minirreproductor. **EQ** abre el ecualizador, **PL** la cola, y el menú contextual del título ajusta el tamaño. Si todavía no has conectado la cuenta, inicia sesión desde la ventana principal. La reproducción local depende de Spotify Premium y de las capacidades de Spotifast.
+**Ctrl + M** alterna biblioteca y minirreproductor. **EQ** abre el ecualizador, **PL** la cola, y el menú contextual del título ajusta el tamaño. Si todavía no has conectado la cuenta, la ventana principal te guía para crear tu propia app gratuita de Spotify y pegar su Client ID. Las sesiones ya iniciadas se conservan. La reproducción local depende de Spotify Premium y de las capacidades de Spotifast.
 
 Los instaladores fusionan las preferencias de aspecto y cambian el nombre visible en Spotify Connect a «EVA-01 Audio». No incluyen cuentas, credenciales, listas privadas ni el contenido del equipo que creó este repositorio. Guardan los ajustes visuales anteriores y una copia de cualquier recurso homónimo que sustituyan. La restauración recupera las preferencias y conserva los recursos instalados para poder reutilizarlos.
 
@@ -64,7 +64,7 @@ La skin y paleta principal se pueden regenerar con `python3 eva/build_theme.py` 
 
 ## Código, versión y validación
 
-El código de `upstream/` corresponde a `crmne/spotifast`, tag **v0.13.3**, commit `a4c1b3ef6c9667507f198312453766f6ba953710`. Para compilarlo, sigue [upstream/README.md](upstream/README.md) y [upstream/CONTRIBUTING.md](upstream/CONTRIBUTING.md), desde esa carpeta. Los instaladores usan los binarios oficiales; no recompilan el programa.
+El código de `upstream/` corresponde a `crmne/spotifast`, tag **v0.14.2**, commit `3bc6bb48e2f83e63780e2b0f10b40bda17c5eed5`. Para compilarlo, sigue [upstream/README.md](upstream/README.md) y [upstream/CONTRIBUTING.md](upstream/CONTRIBUTING.md), desde esa carpeta. Los instaladores usan los binarios oficiales; no recompilan el programa.
 
 [Documentación de despliegue](docs/DEPLOYMENT.md) · [Validación](docs/VERIFICATION.md) · [Licencia](LICENSE) · [Procedencia](NOTICE.md).
 

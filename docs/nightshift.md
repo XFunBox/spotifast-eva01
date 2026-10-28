@@ -1,7 +1,7 @@
 # NERV Nightshift (Linux)
 
 Ventana nativa opcional para trabajar: carátula, canción y controles en una sola vista,
-con fondo carbón y verde neón `#9DFF00`. Usa el cliente Spotifast 0.13.3 instalado,
+con fondo carbón y verde neón `#9DFF00`. Usa el cliente Spotifast 0.14.2 instalado,
 sin otra cuenta, motor de audio ni acceso a credenciales.
 
 Requiere Python 3 y PyQt6 con QtSvg y QtNetwork. En Ubuntu, si faltan:

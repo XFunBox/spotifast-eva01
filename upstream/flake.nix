@@ -57,7 +57,7 @@
             ++ lib.optionals stdenv.hostPlatform.isLinux [
               dbus
               alsa-lib
-              libpulseaudio
+              pipewire
               libxkbcommon
               wayland
               libGL
@@ -120,7 +120,7 @@
                 pname = "spotifast";
                 version = (pkgs.lib.importTOML ./Cargo.toml).package.version;
                 src = self;
-                hash = "sha256-ztN4srFKTtR78NPQiotOvYcrmPrL9SXo8qWluBs8WmE=";
+                hash = "sha256-q6wmUeh102dRN4yIwPogq726Zx4AcefUT4lDiqhSnMU=";
               };
               # projectm-sys only searches lib, while CMake may otherwise install to lib64.
               postPatch = ''
@@ -152,7 +152,7 @@
                   with pkgs;
                   [
                     alsa-lib
-                    libpulseaudio
+                    pipewire
                     # libprojectM links OpenGL directly and its GL loader needs
                     # X11 headers while it is built.
                     libGL

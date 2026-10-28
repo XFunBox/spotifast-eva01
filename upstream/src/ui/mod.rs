@@ -6,11 +6,13 @@ pub mod artist;
 pub mod collection;
 pub(crate) mod devices;
 mod dialogs;
+pub(crate) mod friends;
 pub mod home;
 mod keys;
 pub mod library;
 pub mod login;
 mod lyrics;
+pub mod new_releases;
 pub mod player_bar;
 mod prerelease;
 pub mod queue;
@@ -76,9 +78,12 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         if app.show_lyrics_panel {
             lyrics::side_panel(app, ui);
         }
+        if app.show_friends_panel {
+            friends::side_panel(app, ui);
+        }
         central(app, ui);
-        keep_room_for_panels(app, ctx);
     }
+    keep_room_for_panels(app, ctx);
     devices::popup(app, ctx);
     dialogs::show(app, ctx);
     update::show(app, ctx);
@@ -107,14 +112,20 @@ pub(crate) const SIDEBAR_MIN_WIDTH: f32 = 210.0;
 /// so even at its narrowest the page beside the panels keeps the room its
 /// top bar needs (#624), and lower it again once they close. Window managers
 /// that tile ignore the minimum; the panels still give way there.
+///
+/// Full-screen lyrics draw no sidebar or side panel (an open queue becomes a
+/// column inside them), so they ask for no room for them. A screen narrower
+/// than the panels' minimum, such as a portrait monitor, then holds the
+/// full-screen window without a minimum wider than itself (#783).
 fn keep_room_for_panels(app: &App, ctx: &Context) {
     if crate::window::fixed_size() {
         return;
     }
+    let panels = app.lyrics_fullscreen.is_none();
     let width = main_min_width(
         topbar::least_width(ctx),
-        app.settings.sidebar_visible,
-        app.show_queue_panel || app.show_lyrics_panel,
+        panels && app.settings.sidebar_visible,
+        panels && (app.show_queue_panel || app.show_lyrics_panel || app.show_friends_panel),
     )
     .round();
     let id = Id::new("main-min-width");
@@ -155,11 +166,14 @@ pub(crate) fn yielding_panel(
     let (min, max) = range.into_inner();
     let max = max.min(room).max(min);
     let width = chosen.clamp(min, max);
-    // egui remembers the width the panel last drew at, a clamped one too.
-    // Hand it back the chosen width whenever there is room for more.
+    // egui remembers the width the panel last drew at. While nobody drags
+    // its handle, hand it back the chosen width, either way: a resize made
+    // elsewhere (the fullscreen queue column shares the queue width) shows
+    // here too, and the panel never writes a stale width back over it.
     let id = Id::new(id);
-    if let Some(mut state) = egui::containers::panel::PanelState::load(ctx, id)
-        && state.outer_rect.width() + 0.5 < width
+    if !ctx.is_being_dragged(id.with("__resize"))
+        && let Some(mut state) = egui::containers::panel::PanelState::load(ctx, id)
+        && (state.outer_rect.width() - width).abs() > 0.5
     {
         state.outer_rect.set_width(width);
         ctx.data_mut(|data| data.insert_persisted(id, state));
@@ -170,10 +184,15 @@ pub(crate) fn yielding_panel(
     }
 }
 
+/// Whether the person is dragging this panel's resize handle right now.
+pub(crate) fn panel_dragged(ctx: &Context, id: &str) -> bool {
+    ctx.is_being_dragged(Id::new(id).with("__resize"))
+}
+
 /// Whether a panel's new width is one the person chose: it moved while not
 /// held back by the page, or by their own drag.
 pub(crate) fn panel_width_chosen(ctx: &Context, id: &str, fit: &PanelFit) -> bool {
-    !fit.yielding || ctx.is_being_dragged(Id::new(id).with("__resize"))
+    !fit.yielding || panel_dragged(ctx, id)
 }
 
 /// Keeps the most recent loading preview of each metadata type available to
@@ -285,6 +304,15 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
             // page casts a shadow under the header instead.
             ui.spacing_mut().scroll.fade.strength = 0.0;
             topbar::show(app, ui);
+            // One banner at a time: a song that will not play matters more
+            // than a slow app, which waits its turn.
+            if app.dialog.is_none() && page != Page::Settings {
+                if app.audio_key_banner {
+                    audio_key_banner(app, ui);
+                } else if app.slow_banner {
+                    slow_banner(app, ui);
+                }
+            }
             let scroll = crate::autoscroll::show(
                 ui,
                 egui::ScrollArea::vertical()
@@ -304,6 +332,7 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
                             match page {
                                 Page::Home => home::show(app, ui),
                                 Page::TopSongs => collection::top_songs(app, ui),
+                                Page::NewReleases => new_releases::page(app, ui),
                                 Page::Search => search::show(app, ui),
                                 Page::LikedSongs => collection::liked(app, ui),
                                 Page::Albums | Page::Artists | Page::Podcasts | Page::Episodes => {
@@ -318,11 +347,158 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
                                 Page::Settings => settings::show(app, ui),
                             }
                         });
+                    if app.dialog.is_none() && !app.show_devices {
+                        keys::scroll_page(ui);
+                    }
                 },
             );
             ui.ctx()
                 .data_mut(|data| data.insert_temp(scrolled_id, scroll.state.offset.y));
             header_shadow(ui, scroll.inner_rect, scroll.state.offset.y, palette.dark);
+        });
+}
+
+/// Where the "Why?" link of the slow-app banner leads.
+const SLOW_BANNER_GUIDE: &str = "https://spotifast.rocks/troubleshooting/#rate-limits";
+/// Where the "Why?" link of the audio-key banner leads.
+pub const AUDIO_KEY_GUIDE: &str = "https://spotifast.rocks/troubleshooting/#audio-key";
+
+/// A strip under the top bar suggesting a personal app, after Spotify
+/// told the shared app, which only listeners signed in before 0.14.2 still
+/// use, that it sent too many requests. It stays put while the
+/// page scrolls, and goes when it is closed.
+fn slow_banner(app: &mut App, ui: &mut egui::Ui) {
+    use crate::i18n::gettext;
+    let locale = app.locale;
+    banner(
+        app,
+        ui,
+        &gettext(locale, "Spotify is being slow on the shared app."),
+        &gettext(
+            locale,
+            "Spotifast no longer offers the shared app, and Spotify can stop accepting it at any time. Set up your own free Spotify app and you won't have to wait.",
+        ),
+        [
+            (
+                gettext(locale, "Set up personal app"),
+                Action::OpenPersonalAppSetup,
+            ),
+            (
+                // Translators: a button that opens a page explaining why
+                // the banner it sits in appeared.
+                gettext(locale, "Why?"),
+                Action::OpenUrl(SLOW_BANNER_GUIDE.into()),
+            ),
+        ],
+        Action::CloseSlowBanner,
+    );
+}
+
+/// A strip under the top bar after Spotify refused the key that decrypts a
+/// song on this computer, offering another Spotify device, which fetches
+/// its own audio, and the guide's explanation.
+fn audio_key_banner(app: &mut App, ui: &mut egui::Ui) {
+    use crate::i18n::gettext;
+    let locale = app.locale;
+    banner(
+        app,
+        ui,
+        &gettext(
+            locale,
+            "Spotify won't let this computer play this song right now.",
+        ),
+        &gettext(
+            locale,
+            "Spotify refused the key that unlocks the audio. Spotifast can't fix that, but it sometimes clears up on its own. You can still play on your phone or another Spotify device.",
+        ),
+        [
+            (
+                gettext(locale, "Play on another device"),
+                Action::PlayOnAnotherDevice,
+            ),
+            (
+                gettext(locale, "Why?"),
+                Action::OpenUrl(AUDIO_KEY_GUIDE.into()),
+            ),
+        ],
+        Action::CloseAudioKeyBanner,
+    );
+}
+
+/// A notice under the top bar: a bold line, a sentence or two, a main and
+/// a secondary button, and a close button.
+fn banner(
+    app: &mut App,
+    ui: &mut egui::Ui,
+    title: &str,
+    text: &str,
+    [(primary, primary_action), (secondary, secondary_action)]: [(std::borrow::Cow<'static, str>, Action);
+        2],
+    close: Action,
+) {
+    use crate::i18n::gettext;
+    let palette = app.palette;
+    let locale = app.locale;
+    Frame::new()
+        .outer_margin(Margin {
+            left: widgets::PAGE_PADDING as i8,
+            right: widgets::PAGE_PADDING as i8,
+            top: 0,
+            bottom: 8,
+        })
+        .fill(palette.surface)
+        .stroke(Stroke::new(1.0, palette.outline))
+        .corner_radius(CornerRadius::same(theme::RADIUS))
+        .inner_margin(Margin {
+            left: 16,
+            right: 6,
+            top: 12,
+            bottom: 12,
+        })
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                if theme::icon_button(
+                    ui,
+                    Icon::X,
+                    16.0,
+                    palette.secondary,
+                    palette.text,
+                    &gettext(locale, "Close banner"),
+                )
+                .clicked()
+                {
+                    app.actions.push(close);
+                }
+                ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                    ui.spacing_mut().item_spacing = vec2(8.0, 4.0);
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(title)
+                                .font(theme::bold(14.0))
+                                .color(palette.text),
+                        )
+                        .wrap(),
+                    );
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(text)
+                                .font(theme::regular(13.0))
+                                .color(palette.secondary),
+                        )
+                        .wrap(),
+                    );
+                    ui.add_space(6.0);
+                    ui.horizontal_wrapped(|ui| {
+                        if theme::pill_button(ui, &palette, &primary, true).clicked() {
+                            app.actions.push(primary_action);
+                        }
+                        if theme::pill_button(ui, &palette, &secondary, false).clicked() {
+                            app.actions.push(secondary_action);
+                        }
+                    });
+                });
+            });
         });
 }
 

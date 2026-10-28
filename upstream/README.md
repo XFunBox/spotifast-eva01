@@ -47,9 +47,11 @@ https://github.com/user-attachments/assets/a5f669ce-b3b7-4f8e-9933-976a78876c7e
 | Feature | What you can do |
 |---|---|
 | **Library and search** | Browse playlists, Liked Songs, albums, artists, and podcasts. Search the catalogue and edit playlists you own. |
-| **Spotify Connect** | Play on this computer or control playback on your other devices, including Google Cast speakers and groups. |
-| **Themes** | Choose light, dark, system appearance, or custom colours. On Omarchy, follow your desktop theme. |
-| **Desktop controls** | Use keyboard shortcuts and media keys. Keep music playing from the tray when supported by your desktop and settings. |
+| **Local files** | Play the local files your playlists list from a folder you choose in Settings, at any sample rate. |
+| **Spotify Connect** | Play on this computer or control playback on your other devices, including Google Cast speakers and groups. Cast devices appear as they are discovered; frequently and recently chosen outputs rise to the top. Remote volume keeps your chosen level while Spotify updates. |
+| **Queue** | Add songs to the queue, or choose **Play next** to put a song or selection first when playing on this computer. |
+| **Themes** | Choose light, dark, system appearance, or custom colours, with one theme for light mode and one for dark mode that switch with the system. On Omarchy, follow your desktop theme. |
+| **Desktop controls** | Use keyboard shortcuts and media keys. Keep music playing from the tray when supported by your desktop and settings, and start Spotifast with your computer, with its window or in the tray. |
 | **Winamp mini player** | Use classic skins with an equalizer, playlist, and animated sound displays. |
 | **MilkDrop** | Watch music-reactive visuals in a separate window or full screen. See platform availability below. |
 
@@ -65,11 +67,17 @@ https://github.com/user-attachments/assets/a5f669ce-b3b7-4f8e-9933-976a78876c7e
 
 ## Start listening
 
-1. Open Spotifast and choose **Sign in with Spotify**. Approve access in your
-   browser, then return to the app to see your library.
-2. To listen on this computer, open the device menu in the bottom player bar
+1. Make your own free Spotify app, as the sign-in screen shows: in the
+   [Spotify developer dashboard](https://developer.spotify.com/dashboard),
+   create an app with the redirect URI `http://127.0.0.1:8989/login` and
+   **Web API** ticked. Spotify requires Premium on the account that creates
+   it. [Getting started](https://spotifast.rocks/getting-started/#make-a-spotify-app)
+   has the steps.
+2. Paste its Client ID into Spotifast and choose **Sign in with Spotify**.
+   Approve access in your browser, then return to the app to see your library.
+3. To listen on this computer, open the device menu in the bottom player bar
    and choose **Set up playback here**, also available in Settings.
-3. Complete the separate playback approval in your browser. Your computer
+4. Complete the separate playback approval in your browser. Your computer
    appears as a Spotify Connect device named **Spotifast**.
 
 Library access and local playback have separate approvals. Spotifast remembers
@@ -82,6 +90,7 @@ and [How it connects](https://spotifast.rocks/how-it-connects/) for the details.
 A classic look for your music, with Winamp 2 `.wsz` skins, an equalizer,
 a playlist, and animated sound displays. Switch with **Ctrl+M**
 (**Cmd+Shift+M** on macOS), the shrink button, or Settings.
+The spectrum analyser and oscilloscope also work in the collapsed title bar.
 
 <p align="center">
   <img src="docs/assets/images/winamp.png" alt="Spotifast's Winamp mini player with the built-in skin, equalizer, and playlist" width="320">
@@ -113,6 +122,7 @@ The complete guide lives at **[spotifast.rocks](https://spotifast.rocks/)**.
 | Learn shortcuts, command-line controls, and updates | [Everyday use](https://spotifast.rocks/using-spotifast/) |
 | Find configuration and stored files | [Settings and files](https://spotifast.rocks/settings-and-files/) |
 | Understand scrolling performance and reduce loading delays | [Make it even faster](https://spotifast.rocks/make-it-even-faster/) |
+| Fix "Spotify refused the audio key" or "Spotify is being slow" | [When something goes wrong](https://spotifast.rocks/troubleshooting/) |
 | Understand what is stored and sent | [Privacy](https://spotifast.rocks/privacy/) · [How it connects](https://spotifast.rocks/how-it-connects/) |
 | Check Spotify and librespot limitations | [What Spotify allows](https://spotifast.rocks/what-spotify-allows/) |
 | Understand account risk | [Will my account get banned?](https://spotifast.rocks/what-is-spotifast/#will-my-spotify-account-get-banned) |

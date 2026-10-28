@@ -16,6 +16,7 @@ def load(name):
 sources = load("check-dependency-sources")
 evidence = load("check-review-evidence")
 settings = load("check-new-settings")
+media = load("check-review-media")
 
 LOCK = """
 version = 4
@@ -225,6 +226,28 @@ class NewSettingsTest(unittest.TestCase):
         base = settings_source("")
         head = base.replace("pub device_name:", "pub connect_name:").replace("pub queue:", "pub history:")
         self.assertEqual(settings.added(base, head), [("Settings", "connect_name")])
+
+
+class ReviewMediaTest(unittest.TestCase):
+    ATTACHMENT = "![sidebar](https://github.com/user-attachments/assets/0f1e2d3c)"
+
+    def test_an_interface_change_without_media_fails(self):
+        found = media.problem(["src/ui/sidebar.rs", "src/app.rs"], ["Narrows the sidebar."], set())
+        self.assertIn("src/ui/sidebar.rs", found)
+        self.assertNotIn("src/app.rs", found)
+
+    def test_media_in_the_description_or_an_author_comment_passes(self):
+        self.assertIsNone(media.problem(["src/ui/sidebar.rs"], [self.ATTACHMENT], set()))
+        self.assertIsNone(media.problem(["src/skin/wsz.rs"], [None, '<img src="x.png" width="400">'], set()))
+
+    def test_changes_that_draw_nothing_pass(self):
+        self.assertIsNone(media.problem(["src/player.rs", "docs/_guide/winamp.md"], [""], set()))
+
+    def test_the_maintainer_label_passes_a_change_with_nothing_to_show(self):
+        self.assertIsNone(media.problem(["src/ui/queue.rs"], ["Fixes a crash."], {"no-visual-change"}))
+
+    def test_a_plain_link_is_not_media(self):
+        self.assertIsNotNone(media.problem(["src/ui/home.rs"], ["See https://example.com/shot.png"], set()))
 
 
 if __name__ == "__main__":

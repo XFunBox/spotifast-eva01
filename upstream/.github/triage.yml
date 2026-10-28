@@ -14,6 +14,16 @@ labels:
   out-of-scope: The exact request conflicts with a documented product boundary.
   question: One specific missing technical fact prevents investigation.
   wontfix: The exact request is explicitly ruled out by repository documentation.
+pull_requests:
+  visual_paths:
+    - src/ui/**
+    - src/theme.rs
+    - src/appearance.rs
+    - src/skin/**
+    - src/winamp.rs
+    - src/vis.rs
+    - src/window.rs
+    - src/window/**
 sources:
 - README.md
 - CONTRIBUTING.md
@@ -67,6 +77,11 @@ instructions: |
   binary, or source code. Ask for the flagged artifact's SHA-256 when missing.
   Never recommend restoring quarantine, disabling protection, or exclusions;
   paid signing neither guarantees a remedy nor is necessarily the only remedy.
+  A Windows "unknown publisher", "Windows protected your PC", or "couldn't
+  confirm the creator" prompt, or a macOS Gatekeeper prompt, is the operating
+  system's warning for an unsigned or newly downloaded app, not an antivirus
+  detection. Select docs/_guide/download.md (https://spotifast.rocks/download/),
+  which explains More info, then Run anyway, and do not ask for a SHA-256.
 
   For user bug reports, ask one direct question only when its answer is necessary
   to investigate and has not already been supplied or requested. Do not select
@@ -93,6 +108,30 @@ instructions: |
   For feature requests that ask for a new setting or option, do not propose
   one: new settings need the maintainer's review and the default answer is
   no, so leave the decision to the maintainer.
+
+  CONTRIBUTING.md "Settled decisions" lists closed questions; cite its
+  section instead of leaving them to the maintainer. A pull request or issue
+  that adds buttons, a queue, hints or a separate player to full screen is out
+  of scope (CONTRIBUTING.md#full-screen). Alternative themes or opt-in looks
+  are out of scope (#one-look). A setting that only hides a player bar button
+  is out of scope (#player-bar-buttons). A new kind of mini player skin goes in
+  the one Mini player section, never a section of its own
+  (#mini-player-skins). Requests to browse local files or add folders are
+  collected for the maintainer's design; link the related issues and promise
+  nothing (#local-files). A pull request that patches native window code goes
+  to winit upstream first (#windowing). A pull request that signs in with
+  another project's Spotify Client ID or redirect path is closed
+  (#other-projects-spotify-apps). Before welcoming a feature pull
+  request, check the guides for the feature: the queue's "Playing from" line
+  already opens the page that is playing.
+
+  The maintainer waives visual evidence for an interface change that shows
+  nothing new with the no-visual-change label; name it in next_step.
+
+  "Spotify refused the audio key" reports: link #283 and
+  https://spotifast.rocks/troubleshooting/#audio-key. Rate limits and a slow
+  shared app: link https://spotifast.rocks/troubleshooting/#rate-limits. Do
+  not open a new investigation for either.
 
   For opening Spotify links, login setup, and proxies, select
   docs/_guide/getting-started.md. Distinguish released features from support

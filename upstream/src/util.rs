@@ -101,6 +101,19 @@ pub fn format_date(locale: Locale, iso: &str) -> String {
         .replace("{year}", year)
 }
 
+/// The window within which timestamps are rendered as relative dates (30 days).
+pub const RELATIVE_DATE_LIMIT_SECONDS: i64 = 30 * 24 * 60 * 60;
+
+/// Returns true when `iso` is an ISO timestamp within the relative date window
+/// (the past 30 days up to `now`).
+pub fn is_relative_date(iso: &str, now: jiff::Timestamp) -> bool {
+    let Ok(added) = iso.parse::<jiff::Timestamp>() else {
+        return false;
+    };
+    let seconds = added.duration_until(now).as_secs_f64().floor() as i64;
+    (0..RELATIVE_DATE_LIMIT_SECONDS).contains(&seconds)
+}
+
 /// `5 minutes ago` for recent ISO-8601 timestamps, otherwise the usual date.
 ///
 /// Dates are shown relatively for their first 30 days, matching the playlist
@@ -111,7 +124,7 @@ pub fn format_relative_date(locale: Locale, iso: &str, now: jiff::Timestamp) -> 
         return format_date(locale, iso);
     };
     let seconds = added.duration_until(now).as_secs_f64().floor() as i64;
-    if !(0..30 * 24 * 60 * 60).contains(&seconds) {
+    if !(0..RELATIVE_DATE_LIMIT_SECONDS).contains(&seconds) {
         return format_date(locale, iso);
     }
 
@@ -472,6 +485,18 @@ mod tests {
             format_relative_date(Locale::English, "2026-08-01T12:00:00Z", now),
             "Aug 1, 2026"
         );
+        assert!(is_relative_date("2026-08-31T11:59:30Z", now));
+        assert!(is_relative_date("2026-08-31T11:00:00Z", now));
+        assert!(is_relative_date("2026-08-30T12:00:00Z", now));
+        assert!(is_relative_date("2026-08-17T12:00:00Z", now));
+        assert!(!is_relative_date("2026-08-01T12:00:00Z", now));
+        assert!(!is_relative_date("2026-09-01T12:00:00Z", now));
+        assert!(!is_relative_date("not-a-date", now));
+
+        // Relative date detection is independent of locale wording.
+        let pt = format_relative_date(Locale::PortugueseBrazil, "2026-08-31T11:59:30Z", now);
+        assert!(!pt.ends_with(" ago"));
+        assert!(is_relative_date("2026-08-31T11:59:30Z", now));
     }
 
     #[test]
@@ -526,6 +551,19 @@ mod tests {
                 format_relative_date(Locale::Ukrainian, added, now),
                 expected
             );
+        }
+        assert_eq!(format_date(Locale::Korean, "2024-01-05"), "2024년 1월 5일");
+        assert_eq!(format_date(Locale::Korean, "2024-09"), "2024년 9월");
+        assert_eq!(format_total_ms(Locale::Korean, 7_980_000), "2시간 13분");
+        assert_eq!(format_episode_ms(Locale::Korean, 2_280_000), "38분");
+        for (added, expected) in [
+            ("2026-08-31T11:59:59Z", "1초 전"),
+            ("2026-08-31T11:58:00Z", "2분 전"),
+            ("2026-08-31T07:00:00Z", "5시간 전"),
+            ("2026-08-30T12:00:00Z", "1일 전"),
+            ("2026-08-17T12:00:00Z", "2주 전"),
+        ] {
+            assert_eq!(format_relative_date(Locale::Korean, added, now), expected);
         }
     }
 
