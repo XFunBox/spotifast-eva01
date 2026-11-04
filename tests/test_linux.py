@@ -108,7 +108,7 @@ class InstallerTests(unittest.TestCase):
                 a, b = original.read(name), custom.read(name)
                 self.assertEqual(b[:2], b'BM')
                 self.assertEqual(struct.unpack_from('<ii', a, 18), struct.unpack_from('<ii', b, 18))
-            self.assertEqual(count, 15)
+            self.assertEqual(count, 17)
 
 
 if __name__ == '__main__':

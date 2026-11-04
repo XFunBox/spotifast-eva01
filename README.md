@@ -1,6 +1,6 @@
 # EVA-01 Audio · Spotifast
 
-Spotifast 0.14.2 con temas Evangelion, skin NERV e instaladores para Linux y Windows. Incluye el código original en `upstream/`, sin modificaciones al motor de audio, y conserva su licencia MIT y autoría.
+Spotifast 0.17.1 con temas Evangelion, skin NERV e instaladores para Linux y Windows. Incluye el código original en `upstream/`, sin modificaciones al motor de audio, y conserva su licencia MIT y autoría.
 
 ![Vista previa de la skin compacta](eva/assets/EVA-01-preview.png)
 
@@ -44,7 +44,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\eva\install-windows.ps
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\eva\restore-windows.ps1
 ```
 
-El repositorio es público. Puedes clonar el código o descargar el ZIP de [EVA-01 Audio v1.2.0](https://github.com/XFunBox/spotifast-eva01/releases/tag/v1.2.0), que incluye Spotifast 0.14.2 y NERV Nightshift. La entrega incluye `SHA256SUMS.txt` para verificar el paquete; los instaladores obtienen el reproductor oficial y comprueban su SHA-256.
+El repositorio es público. Puedes clonar el código o descargar el ZIP de [EVA-01 Audio v1.3.0](https://github.com/XFunBox/spotifast-eva01/releases/tag/v1.3.0), que incluye Spotifast 0.17.1 y NERV Nightshift. La entrega incluye `SHA256SUMS.txt` para verificar el paquete; los instaladores obtienen el reproductor oficial y comprueban su SHA-256.
 
 ## Temas y controles
 
@@ -54,7 +54,7 @@ verde neón, carátula y controles para trabajar. Instalación y atajos en
 
 - **EVA-01**: negro, morado y verde vivo.
 - **EVA-01 Terminal**: negro verdoso y verde vivo.
-- **EVA-01.wsz**: skin clásica completa, 15 hojas de sprites, títulos de consola NERV y ecualizador AT FIELD.
+- **EVA-01.wsz**: skin clásica completa, 17 hojas de sprites, títulos de consola NERV y ecualizador AT FIELD.
 
 **Ctrl + M** alterna biblioteca y minirreproductor. **EQ** abre el ecualizador, **PL** la cola, y el menú contextual del título ajusta el tamaño. Si todavía no has conectado la cuenta, la ventana principal te guía para crear tu propia app gratuita de Spotify y pegar su Client ID. Las sesiones ya iniciadas se conservan. La reproducción local depende de Spotify Premium y de las capacidades de Spotifast.
 
@@ -64,7 +64,7 @@ La skin y paleta principal se pueden regenerar con `python3 eva/build_theme.py` 
 
 ## Código, versión y validación
 
-El código de `upstream/` corresponde a `crmne/spotifast`, tag **v0.14.2**, commit `3bc6bb48e2f83e63780e2b0f10b40bda17c5eed5`. Para compilarlo, sigue [upstream/README.md](upstream/README.md) y [upstream/CONTRIBUTING.md](upstream/CONTRIBUTING.md), desde esa carpeta. Los instaladores usan los binarios oficiales; no recompilan el programa.
+El código de `upstream/` corresponde a `crmne/spotifast`, tag **v0.17.1**, commit `d22e8185e0baadbbd4d0262023f74d30b493c6e4`. Para compilarlo, sigue [upstream/README.md](upstream/README.md) y [upstream/CONTRIBUTING.md](upstream/CONTRIBUTING.md), desde esa carpeta. Los instaladores usan los binarios oficiales; no recompilan el programa.
 
 [Documentación de despliegue](docs/DEPLOYMENT.md) · [Validación](docs/VERIFICATION.md) · [Licencia](LICENSE) · [Procedencia](NOTICE.md).
 

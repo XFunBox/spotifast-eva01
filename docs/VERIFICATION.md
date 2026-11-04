@@ -1,6 +1,6 @@
 # Validación
 
-La ventana principal en Ubuntu/KDE cargó la paleta EVA-01 y su caché RGBA real; se comprobó la biblioteca en español y el visualizador. La skin tiene 15 hojas BMP con dimensiones idénticas a las del skin integrado de Spotifast, ZIP íntegro y 24 colores de visualizador.
+La ventana principal en Ubuntu/KDE cargó la paleta EVA-01 y su caché RGBA real; se comprobó la biblioteca en español y el visualizador. La skin tiene 17 hojas BMP con dimensiones idénticas a las del skin integrado de Spotifast, ZIP íntegro y 24 colores de visualizador.
 
 Las pruebas automatizadas Linux cubren conservación de ajustes ajenos, restauración sin deshacer cambios posteriores, reinstalación y cambio de tema, ausencia de escrituras en simulación, rechazo de ajustes inválidos, descarga con hash incorrecto sin cambiar el perfil, copias de recursos homónimos y rutas XDG/con espacios.
 
@@ -24,3 +24,12 @@ Ocho regresiones del instalador Linux y siete de Nightshift correctas; Bash y re
 En KDE real, AppImage y runtime Nightshift 0.14.2 comprobados, con arranque real del reproductor, CLI local y MPRIS. Preferencias y recursos anteriores conservados, sin reproducir música durante la prueba. No se ha probado audio autenticado Windows ni hardware ARM64.
 
 La primera comprobación de 0.14.2 en CI detectó que faltaba libpipewire en el runner Linux, nueva dependencia oficial desde 0.14.0. Se añadió `libpipewire-0.3-0t64` a la preparación de CI y a los requisitos Ubuntu del README; se mantiene la comprobación real de arranque. Windows completó instalación y comprobación de versión.
+
+
+## Actualización 0.17.1 — 04/11/2026
+
+Snapshot de 438 archivos contrastado por blobs y modos con el commit oficial `d22e8185e0baadbbd4d0262023f74d30b493c6e4`. Los cuatro hashes del manifiesto Linux/Windows coinciden con checksums.txt y los digests de GitHub. Skin EVA regenerada desde la base actual: 17 hojas BMP, incluidas gen.bmp y genex.bmp para las ventanas genéricas. Paletas, iconos y vista previa conservados.
+
+Las ocho regresiones Linux y siete de Nightshift verifican preferencias, restauración, recursos, dimensiones de sprites y protocolo. La CI instala y comprueba la versión oficial en Linux y Windows; el resultado del commit se consulta en Actions. No se recompila el motor Rust ni se prueba audio autenticado Windows o hardware ARM.
+
+En KDE, AppImage y runtime Nightshift responden 0.17.1; arranque real, MPRIS y lectura de estado con el parser Nightshift comprobados. Preferencias previas sin cambios y reproducción recuperada tras el reinicio. Instalación Linux aislada con el AppImage verificado y acceso desktop válidos. `git diff --check` solo señala dos espacios finales ya presentes en documentación upstream; el snapshot se conserva idéntico al oficial.
