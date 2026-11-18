@@ -2,7 +2,7 @@
 
 ## Versiones fijadas
 
-El manifiesto `eva/release-lock.json` fija Spotifast 0.17.1, commit de fuente, URLs y SHA-256 para Linux x86_64/ARM64 y Windows x86_64/ARM64. Para actualizar, revisar una release oficial nueva, compatibilidad de configuración y sprites; cambiar versión, hashes y snapshot `upstream/` juntos y ejecutar la CI. Los instaladores no eligen `latest` automáticamente.
+El manifiesto `eva/release-lock.json` fija Spotifast 0.17.2, commit de fuente, URLs y SHA-256 para Linux x86_64/ARM64 y Windows x86_64/ARM64. Para actualizar, revisar una release oficial nueva, compatibilidad de configuración y sprites; cambiar versión, hashes y snapshot `upstream/` juntos y ejecutar la CI. Los instaladores no eligen `latest` automáticamente.
 
 ## Linux
 
@@ -45,3 +45,7 @@ La restauración no desinstala el reproductor, los temas, los iconos ni los acce
 ## Publicación
 
 El código fuente completo está en GitHub y la release distribuye un ZIP con instaladores, temas, licencia y documentación. Los binarios nativos se obtienen del repositorio oficial durante la instalación; no se duplican binarios grandes en Git.
+
+## Actualizaciones de Spotifast 0.17.2
+
+Spotifast 0.17.2 introduce `update_automatically` y sustituye el antiguo campo `download_updates_automatically`. Tras actualizar, revisa Ajustes → Actualizaciones: si antes las tenías desactivadas, desactiva también el nuevo interruptor. Las actualizaciones internas de Spotifast no renuevan el runtime extraído de Nightshift; vuelve a ejecutar su instalador para mantener ambos en la misma versión. Los instaladores EVA siguen fijando la versión del manifiesto.

@@ -845,7 +845,6 @@ pub enum Command {
         manual: bool,
         source: crate::updates::Source,
     },
-    InspectUpdate,
     DownloadUpdate {
         release: crate::updates::Release,
         source: crate::updates::Source,
@@ -1003,7 +1002,9 @@ pub enum Event {
         config: ProxyConfig,
         result: Result<bool, String>,
     },
-    UpdateSupport(Result<crate::updates::Installation, String>),
+    /// Whether this copy can install the release just checked, or what the
+    /// update window says instead.
+    UpdateSupport(crate::updates::Support),
     UpdateProgress {
         received: u64,
         total: u64,
@@ -1372,7 +1373,6 @@ impl Backend {
                     | Command::ClearAudioCache
                     | Command::Shutdown
                     | Command::CheckForUpdates { .. }
-                    | Command::InspectUpdate
                     | Command::DownloadUpdate { .. }
                     | Command::InstallUpdate { .. }
             )
@@ -2481,6 +2481,9 @@ impl Worker {
                 }
                 Command::Api(ApiRequest::Search { query, serial }) => self.search(query, serial),
                 Command::Api(request) => {
+                    if let ApiRequest::PlaybackState { seq } = &request {
+                        self.connect.poll_sent(*seq, self.cluster_playing());
+                    }
                     self.dispatch(request);
                 }
                 Command::ApiFinished {
@@ -2561,8 +2564,13 @@ impl Worker {
                             self.connect.observe_playing(
                                 *seq,
                                 state.as_ref().and_then(|state| state.device.as_ref()),
+                                self.cluster_playing(),
                             );
                         }
+                        ApiResponse::PlaybackState {
+                            seq,
+                            result: Err(_),
+                        } => self.connect.poll_failed(*seq),
                         _ => {}
                     }
                     if let ApiResponse::MadeForYou {
@@ -2686,37 +2694,30 @@ impl Worker {
                 Command::CheckForUpdates { manual, source } => {
                     self.check_for_updates(manual, source)
                 }
-                Command::InspectUpdate => {
-                    let proxy = self.engine_config.proxy.clone();
-                    let events = self.events.clone();
-                    let waker = self.waker.clone();
-                    tokio::task::spawn_blocking(move || {
-                        let result = crate::updates::updater(&proxy)
-                            .map_err(|error| format!("{error:#}"))
-                            .and_then(|updater| {
-                                updater.installation().map_err(|error| error.to_string())
-                            });
-                        let _ = events.send(Event::UpdateSupport(result));
-                        waker.wake();
-                    });
-                }
                 Command::DownloadUpdate { release, source } => {
                     let proxy = self.engine_config.proxy.clone();
                     let events = self.events.clone();
                     let waker = self.waker.clone();
                     tokio::task::spawn_blocking(move || {
-                        let result = crate::updates::updater(&proxy)
-                            .and_then(|updater| {
-                                updater
-                                    .with_source(source)
-                                    .download(&release, |received, total| {
-                                        let _ =
-                                            events.send(Event::UpdateProgress { received, total });
-                                        waker.wake();
-                                    })
-                            })
-                            .map(Box::new)
-                            .map_err(|error| format!("{error:#}"));
+                        let result = crate::updates::updater(&proxy).and_then(|updater| {
+                            let updater = updater.with_source(source);
+                            let result = updater.download(&release, |received, total| {
+                                let _ = events.send(Event::UpdateProgress { received, total });
+                                waker.wake();
+                            });
+                            // A release that doesn't sign this copy's download
+                            // is out all the same: say how to get it instead.
+                            if let Err(error) = &result
+                                && let Some(reason) =
+                                    error.downcast_ref::<crate::updates::Unsupported>()
+                            {
+                                let notice =
+                                    crate::updates::notice(&updater, reason, &release.version);
+                                let _ = events.send(Event::UpdateSupport(Err(notice)));
+                            }
+                            result
+                        });
+                        let result = result.map(Box::new).map_err(|error| format!("{error:#}"));
                         let _ = events.send(Event::UpdateDownloaded(result));
                         waker.wake();
                     });
@@ -4287,6 +4288,16 @@ impl Worker {
         });
     }
 
+    /// The device the playback session's Connect cluster names as playing,
+    /// if the session is this account's.
+    fn cluster_playing(&self) -> Option<String> {
+        let account = self.api.account();
+        self.engine
+            .as_deref()
+            .filter(|engine| same_account(&engine.session().username(), account.as_ref()))
+            .and_then(Engine::active_device)
+    }
+
     /// Starts Spotify on a Google Cast device and signs it in with a token
     /// that this session obtains for the device's Spotify client.
     fn activate_cast(&self, receiver: crate::zeroconf::Receiver) {
@@ -4327,11 +4338,30 @@ impl Worker {
         let waker = self.waker.clone();
         tokio::task::spawn_blocking(move || {
             let result = usable.and_then(|()| {
-                crate::updates::updater(&proxy)
-                    .and_then(|updater| updater.with_source(source).check())
-                    .map_err(|error| format!("{error:#}"))
+                (|| {
+                    let updater = crate::updates::updater(&proxy)?.with_source(source);
+                    // Only a release whose signed checksums verify is
+                    // announced, whether or not this copy can install it.
+                    let Some(release) = updater.check()? else {
+                        return Ok(None);
+                    };
+                    let support = crate::updates::support(&updater, &release).map_err(|error| {
+                        anyhow::anyhow!("Couldn't verify version {}: {error:#}", release.version)
+                    })?;
+                    Ok(Some((release, support)))
+                })()
+                .map_err(|error: anyhow::Error| format!("{error:#}"))
             });
+            let (result, support) = match result {
+                Ok(Some((release, support))) => (Ok(Some(release)), Some(support)),
+                Ok(None) => (Ok(None), None),
+                Err(error) => (Err(error), None),
+            };
             let _ = events.send(Event::UpdateChecked { manual, result });
+            // After the release, so the window that opens on it knows.
+            if let Some(support) = support {
+                let _ = events.send(Event::UpdateSupport(support));
+            }
             waker.wake();
         });
     }
@@ -5613,7 +5643,7 @@ async fn handle(
 
     // Spotify does not always flag a restricted device beforehand (a Sonos
     // another app is steering, say), and then refuses its player commands.
-    let retry = command_device(&request).map(|device| (device.to_string(), request.clone()));
+    let retry = command_device(&request).map(|_| request.clone());
     let response = match request {
         ApiRequest::Me => ApiResponse::Me(routed!(me())),
         ApiRequest::Devices => ApiResponse::Devices(routed!(devices())),
@@ -6013,17 +6043,10 @@ async fn handle(
             };
             ApiResponse::Remote { action, result }
         }
-        ApiRequest::ShufflePlay { device_id, play } => {
-            let device = device_id.as_deref();
-            let result = match routed!(set_shuffle(true, device)) {
-                Ok(()) => routed!(play(device, Some(&play))),
-                Err(error) => Err(error),
-            };
-            ApiResponse::Remote {
-                action: RemoteAction::Play,
-                result,
-            }
-        }
+        ApiRequest::ShufflePlay { device_id, play } => ApiResponse::Remote {
+            action: RemoteAction::Play,
+            result: routed!(shuffle_play(device_id.as_deref(), &play)),
+        },
         ApiRequest::Transfer { device_id, play } => ApiResponse::Transferred {
             result: routed!(transfer(&device_id, play)),
             device_id,
@@ -6055,12 +6078,20 @@ async fn handle(
             }
         }
     };
-    if let Some((device, request)) = retry
+    if let Some(request) = retry
         && refused_as_restricted(&response)
         && let Some(engine) = engine
             .filter(|engine| same_account(&engine.session().username(), api.account().as_ref()))
     {
-        connect.mark_restricted(&device);
+        // A command naming no device went to the one playing, which the Web
+        // API reports without an id when it is a Sonos.
+        let device = command_device(&request)
+            .flatten()
+            .map(str::to_owned)
+            .or_else(|| engine.active_device());
+        if let Some(device) = &device {
+            connect.mark_restricted(device);
+        }
         if let Some(response) = over_connect(engine, connect, &request).await {
             log::debug!("Spotify route operation={operation:?} source=connect after refusal");
             return (response, Vec::new());
@@ -6070,14 +6101,15 @@ async fn handle(
     (response, expired.get().into_iter().collect())
 }
 
-/// The device a player command names, for those [`over_connect`] can send.
-fn command_device(request: &ApiRequest) -> Option<&str> {
+/// The device a player command names, for those [`over_connect`] can send:
+/// `Some(None)` for one meant for whichever device plays.
+fn command_device(request: &ApiRequest) -> Option<Option<&str>> {
     match request {
         ApiRequest::Remote { device_id, .. }
         | ApiRequest::ShufflePlay { device_id, .. }
         | ApiRequest::AddToQueue { device_id, .. }
-        | ApiRequest::AddManyToQueue { device_id, .. } => device_id.as_deref(),
-        ApiRequest::Transfer { device_id, .. } => Some(device_id),
+        | ApiRequest::AddManyToQueue { device_id, .. } => Some(device_id.as_deref()),
+        ApiRequest::Transfer { device_id, .. } => Some(Some(device_id)),
         _ => None,
     }
 }
@@ -6113,6 +6145,7 @@ async fn over_connect(
     request: &ApiRequest,
 ) -> Option<ApiResponse> {
     let session = engine.session();
+    let playing = engine.active_device();
     Some(match request {
         ApiRequest::Remote {
             action,
@@ -6123,7 +6156,7 @@ async fn over_connect(
             flag,
             repeat,
         } => {
-            let to = connect.restricted_target(device_id.as_deref())?;
+            let to = connect.command_target(device_id.as_deref(), playing.as_deref())?;
             let result = match crate::sonos::command_body(
                 *action,
                 play.as_ref(),
@@ -6140,7 +6173,7 @@ async fn over_connect(
             }
         }
         ApiRequest::ShufflePlay { device_id, play } => {
-            let to = connect.restricted_target(device_id.as_deref())?;
+            let to = connect.command_target(device_id.as_deref(), playing.as_deref())?;
             let shuffle = crate::sonos::command_body(RemoteAction::Shuffle, None, 0, true, "")?;
             let start = crate::sonos::command_body(RemoteAction::Play, Some(play), 0, false, "")?;
             let result = shuffle_then_play(shuffle, start, |body| {
@@ -6165,7 +6198,7 @@ async fn over_connect(
             device_id,
             label,
         } => {
-            let to = connect.restricted_target(device_id.as_deref())?;
+            let to = connect.command_target(device_id.as_deref(), playing.as_deref())?;
             let (_, result) = connect
                 .add_to_queue(session, &to, std::slice::from_ref(uri))
                 .await;
@@ -6179,7 +6212,7 @@ async fn over_connect(
             uris,
             device_id,
         } => {
-            let to = connect.restricted_target(device_id.as_deref())?;
+            let to = connect.command_target(device_id.as_deref(), playing.as_deref())?;
             let (added, result) = connect.add_to_queue(session, &to, uris).await;
             ApiResponse::QueueBatchAdded {
                 request: *request,
@@ -8029,8 +8062,8 @@ mod authorization_tests {
             flag: false,
             repeat: String::new(),
         };
-        assert_eq!(command_device(&pause(Some("move"))), Some("move"));
-        assert_eq!(command_device(&pause(None)), None);
+        assert_eq!(command_device(&pause(Some("move"))), Some(Some("move")));
+        assert_eq!(command_device(&pause(None)), Some(None));
         assert_eq!(command_device(&ApiRequest::Devices), None);
     }
 
@@ -8090,7 +8123,7 @@ mod authorization_tests {
             is_restricted: true,
             ..Default::default()
         };
-        previous.observe_playing(1, Some(&device));
+        previous.observe_playing(1, Some(&device), None);
         assert_eq!(
             worker.connect.restricted_target(None).as_deref(),
             Some("sonos")

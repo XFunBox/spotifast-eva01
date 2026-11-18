@@ -33,3 +33,12 @@ Snapshot de 438 archivos contrastado por blobs y modos con el commit oficial `d2
 Las ocho regresiones Linux y siete de Nightshift verifican preferencias, restauración, recursos, dimensiones de sprites y protocolo. La CI instala y comprueba la versión oficial en Linux y Windows; el resultado del commit se consulta en Actions. No se recompila el motor Rust ni se prueba audio autenticado Windows o hardware ARM.
 
 En KDE, AppImage y runtime Nightshift responden 0.17.1; arranque real, MPRIS y lectura de estado con el parser Nightshift comprobados. Preferencias previas sin cambios y reproducción recuperada tras el reinicio. Instalación Linux aislada con el AppImage verificado y acceso desktop válidos. `git diff --check` solo señala dos espacios finales ya presentes en documentación upstream; el snapshot se conserva idéntico al oficial.
+
+
+## Actualización 0.17.2 — 18/11/2026
+
+Snapshot oficial completo de 444 archivos, contrastado por blobs y modos, del commit `aae7452b55a739a88f58b26e149bec8f3e52c556`, sin cambios al motor. Los cuatro hashes del manifiesto Linux/Windows se contrastan con checksums.txt y los digests de GitHub. Temas, skin de 17 hojas, iconos, instaladores y código Nightshift conservados.
+
+Las ocho regresiones Linux y siete de Nightshift pasan. La instalación Linux aislada con ruta con espacios confirma `spotifast 0.17.2` y acceso desktop válido. La CI comprueba instalación y versión Linux/Windows; su resultado del commit se consulta en Actions. Sin compilación del motor Rust, audio autenticado Windows ni hardware ARM64.
+
+En KDE se comprobó 0.17.2 en AppImage y runtime, arranque, MPRIS y parser Nightshift; reproducción recuperada y recursos EVA idénticos. Se conservó la preferencia de actualizaciones automáticas desactivadas tras la migración del campo, que Spotifast activa por defecto.

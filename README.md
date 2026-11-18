@@ -1,6 +1,6 @@
 # EVA-01 Audio · Spotifast
 
-Spotifast 0.17.1 con temas Evangelion, skin NERV e instaladores para Linux y Windows. Incluye el código original en `upstream/`, sin modificaciones al motor de audio, y conserva su licencia MIT y autoría.
+Spotifast 0.17.2 con temas Evangelion, skin NERV e instaladores para Linux y Windows. Incluye el código original en `upstream/`, sin modificaciones al motor de audio, y conserva su licencia MIT y autoría.
 
 ![Vista previa de la skin compacta](eva/assets/EVA-01-preview.png)
 
@@ -44,7 +44,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\eva\install-windows.ps
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\eva\restore-windows.ps1
 ```
 
-El repositorio es público. Puedes clonar el código o descargar el ZIP de [EVA-01 Audio v1.3.0](https://github.com/XFunBox/spotifast-eva01/releases/tag/v1.3.0), que incluye Spotifast 0.17.1 y NERV Nightshift. La entrega incluye `SHA256SUMS.txt` para verificar el paquete; los instaladores obtienen el reproductor oficial y comprueban su SHA-256.
+El repositorio es público. Puedes clonar el código o descargar el ZIP de [EVA-01 Audio v1.3.1](https://github.com/XFunBox/spotifast-eva01/releases/tag/v1.3.1), que incluye Spotifast 0.17.2 y NERV Nightshift. La entrega incluye `SHA256SUMS.txt` para verificar el paquete; los instaladores obtienen el reproductor oficial y comprueban su SHA-256.
 
 ## Temas y controles
 
@@ -64,7 +64,7 @@ La skin y paleta principal se pueden regenerar con `python3 eva/build_theme.py` 
 
 ## Código, versión y validación
 
-El código de `upstream/` corresponde a `crmne/spotifast`, tag **v0.17.1**, commit `d22e8185e0baadbbd4d0262023f74d30b493c6e4`. Para compilarlo, sigue [upstream/README.md](upstream/README.md) y [upstream/CONTRIBUTING.md](upstream/CONTRIBUTING.md), desde esa carpeta. Los instaladores usan los binarios oficiales; no recompilan el programa.
+El código de `upstream/` corresponde a `crmne/spotifast`, tag **v0.17.2**, commit `aae7452b55a739a88f58b26e149bec8f3e52c556`. Para compilarlo, sigue [upstream/README.md](upstream/README.md) y [upstream/CONTRIBUTING.md](upstream/CONTRIBUTING.md), desde esa carpeta. Los instaladores usan los binarios oficiales; no recompilan el programa.
 
 [Documentación de despliegue](docs/DEPLOYMENT.md) · [Validación](docs/VERIFICATION.md) · [Licencia](LICENSE) · [Procedencia](NOTICE.md).
 

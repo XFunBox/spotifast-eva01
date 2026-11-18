@@ -1066,6 +1066,7 @@ const DEMO_CLIENT_ID: &str = "0123456789abcdef0123456789abcdef";
 /// there. The demo may be pointed at a skin in someone's real folder, so it
 /// writes nothing through a link and never opens the file it would replace:
 /// the copy arrives by rename, which replaces a name, not what it points at.
+#[cfg(any(feature = "demo", all(test, unix)))]
 fn place_skin(source: &std::path::Path, folder: &std::path::Path) -> std::io::Result<String> {
     use std::io::{Error, ErrorKind};
     let name = source
@@ -1255,7 +1256,8 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
             | "soloist-playing"
             | "soloist-needs-key"
             | "soloist-reconnecting"
-            | "soloist-error" => {
+            | "soloist-error"
+            | "soloist-bad-build" => {
                 use crate::soloist::{Failure, Status};
                 if surface != "soloist-playing" {
                     app.open(Page::Settings);
@@ -1312,6 +1314,7 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                         }
                     }
                     "soloist-error" => Status::Failed(Failure::NotReady),
+                    "soloist-bad-build" => Status::Failed(Failure::BadBuild),
                     _ => Status::Off,
                 };
             }
@@ -1583,6 +1586,84 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                     version: "0.7.1".into(),
                     url: "https://spotifast.rocks/download/".into(),
                 });
+            }
+            // The update window with a download ready to install.
+            "update-ready" => {
+                let installation = crate::updates::Installation {
+                    executable: "/opt/spotifast/spotifast".into(),
+                    kind: crate::updates::Kind::Portable,
+                };
+                app.update = Some(crate::updates::Release {
+                    version: "0.18.0".into(),
+                    url: "https://github.com/crmne/spotifast/releases/tag/v0.18.0".into(),
+                });
+                app.update_support = Some(Ok(installation.clone()));
+                app.update_download = crate::updates::DownloadState::Ready(Box::new(
+                    crate::updates::Prepared::sample(installation, "0.18.0"),
+                ));
+                app.show_update = true;
+            }
+            // Settings filtered down to the automatic update switch.
+            "settings-updates" => {
+                app.winamp.demo_settings_filter = Some("Update automatically".into());
+            }
+            // The update window of a copy that can't update itself, for
+            // each way Spotifast is installed.
+            "update-aur" | "update-homebrew" | "update-copr" | "update-nixos" | "update-deb"
+            | "update-rpm" | "update-flatpak" | "update-appimage" => {
+                use crate::updates::{Manager, Notice, Route};
+                let version = "0.18.0";
+                let file = |name: &str| {
+                    format!(
+                        "https://github.com/crmne/spotifast/releases/download/v{version}/{name}"
+                    )
+                };
+                let managed = |manager, command: Option<&str>| Route::Managed {
+                    manager,
+                    command: command.map(str::to_owned),
+                };
+                let route = match surface {
+                    "update-aur" => Some(managed(Manager::Aur, Some("yay -Syu spotifast-bin"))),
+                    "update-homebrew" => Some(managed(
+                        Manager::HomebrewCask,
+                        Some("brew upgrade --cask spotifast"),
+                    )),
+                    "update-copr" => Some(Route::Copr {
+                        command: Some("sudo dnf upgrade --refresh spotifast".into()),
+                    }),
+                    "update-nixos" => Some(managed(Manager::Nix, None)),
+                    "update-deb" => Some(Route::Deb {
+                        download: file("spotifast_0.18.0_amd64.deb"),
+                        command: "sudo apt install ~/Downloads/spotifast_0.18.0_amd64.deb".into(),
+                    }),
+                    "update-rpm" => Some(Route::Rpm {
+                        command: format!(
+                            "sudo dnf install {}",
+                            file("spotifast-0.18.0-1.x86_64.rpm")
+                        ),
+                    }),
+                    "update-flatpak" => Some(Route::FlatpakBundle {
+                        download: file("spotifast-v0.18.0-x86_64.flatpak"),
+                        command:
+                            "flatpak install --user ~/Downloads/spotifast-v0.18.0-x86_64.flatpak"
+                                .into(),
+                    }),
+                    _ => None,
+                };
+                let reason = if route.is_none() {
+                    crate::updates::Unsupported::NotWritable
+                } else {
+                    crate::updates::Unsupported::NotPortable
+                };
+                app.update = Some(crate::updates::Release {
+                    version: version.into(),
+                    url: format!("https://github.com/crmne/spotifast/releases/tag/v{version}"),
+                });
+                app.update_support = Some(Err(Notice {
+                    reason: reason.to_string(),
+                    route,
+                }));
+                app.show_update = true;
             }
             "personal-app" => app.dialog = Some(Dialog::PersonalAppIntro),
             "slow-banner" => app.slow_banner = true,
@@ -2783,8 +2864,9 @@ mod tests {
                 let tree = accessible_frame(&ctx, &mut app, vec![]);
                 accessible_node(&tree, &gettext(locale, next), Role::Button);
             }
-            // A liked song's heart opens Add to playlist, whose Remove from
-            // Liked Songs unlikes it; the heart then likes it at once (#792).
+            // A liked song's heart opens a checklist where unchecking Liked
+            // Songs and choosing Done unlikes it; the heart then likes it at
+            // once (#792).
             let click = |ctx: &egui::Context, app: &mut App, label: &'static str| {
                 let tree = accessible_frame(ctx, app, vec![]);
                 let button = accessible_node(&tree, &gettext(locale, label), Role::Button);
@@ -2802,7 +2884,14 @@ mod tests {
             let tree = accessible_frame(&ctx, &mut app, vec![]);
             accessible_node(&tree, &gettext(locale, "Filter playlists"), Role::TextInput);
             assert_eq!(app.is_saved(&now), Some(true), "opening it keeps the like");
-            click(&ctx, &mut app, "Remove from Liked Songs");
+            let liked = accessible_node(&tree, &gettext(locale, "Liked Songs"), Role::CheckBox);
+            accessible_frame(
+                &ctx,
+                &mut app,
+                vec![accessible_action(liked, AccessibleAction::Click, None)],
+            );
+            assert_eq!(app.is_saved(&now), Some(true), "a check waits for Done");
+            click(&ctx, &mut app, "Done");
             assert_eq!(app.is_saved(&now), Some(false));
             click(&ctx, &mut app, "Save to Liked Songs");
             assert_eq!(app.is_saved(&now), Some(true));
@@ -4457,10 +4546,7 @@ mod tests {
             ("without a cover", "Compact track list"),
             ("Ctrl+0", "Interface zoom"),
             ("Rust", "About"),
-            (
-                "Downloads in the background",
-                "Download updates automatically",
-            ),
+            ("installs them the next time", "Update automatically"),
         ] {
             let query = if cfg!(target_os = "macos") && query == "Ctrl+0" {
                 "Cmd+0"
@@ -5626,7 +5712,8 @@ mod tests {
                         ..Default::default()
                     },
                     |ui| {
-                        let field = crate::ui::widgets::playlist_picker(ui, app, &items, query);
+                        let field =
+                            crate::ui::widgets::playlist_picker(ui, app, &items, query, None);
                         if focus {
                             field.request_focus();
                         }
@@ -5726,7 +5813,7 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    let field = crate::ui::widgets::playlist_picker(ui, app, &items, query);
+                    let field = crate::ui::widgets::playlist_picker(ui, app, &items, query, None);
                     if focus {
                         field.request_focus();
                     }
@@ -5808,6 +5895,184 @@ mod tests {
 
         // #then nothing is chosen for the listener
         assert_eq!(added(&app), None);
+        app.backend.shutdown();
+    }
+
+    /// In the heart's checklist a click checks a playlist instead of adding
+    /// to it, a playlist holding the song starts checked, one not read in
+    /// full is marked as unknown rather than lacking it, and Done adds to
+    /// the newly checked and takes the song out of the unchecked.
+    #[test]
+    fn the_heart_checklist_adds_and_removes_only_on_done() {
+        use crate::ui::widgets::Mark;
+        use egui::accesskit::{Action as AccessibleAction, Role};
+
+        let (ctx, mut app) = accessible_app("playlist-checklist");
+        app.backend.set_offline(true);
+        let owner = app.user_id().unwrap().to_string();
+        let make = |id: &str, name: &str| Playlist {
+            id: id.into(),
+            uri: format!("spotify:playlist:{id}"),
+            name: name.into(),
+            owner: crate::api::models::Owner {
+                id: Some(owner.clone()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        app.library.playlists =
+            Loadable::Loaded(vec![make("drive", "Night drive"), make("day", "Daylight")]);
+        let item = PlayableItem::Track(track(0));
+        app.playlist_pages.insert(
+            "day".into(),
+            PlaylistPage {
+                local_additions: [item.uri().to_string()].into(),
+                ..PlaylistPage::default()
+            },
+        );
+        let items = vec![item.clone()];
+        let mut checks = crate::ui::widgets::PlaylistChecks::new(&app, &item);
+        assert_eq!(checks.mark("drive"), Mark::Unknown, "never read");
+        let mut query = String::new();
+        let mut draw = |app: &mut App, events| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(760.0, 620.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    crate::ui::widgets::playlist_picker(
+                        ui,
+                        app,
+                        &items,
+                        &mut query,
+                        Some(&mut checks),
+                    );
+                },
+            );
+            output.textures_delta.clear();
+            output.platform_output.accesskit_update.unwrap()
+        };
+        let tree = draw(&mut app, vec![]);
+        let checked = |tree: &egui::accesskit::TreeUpdate, name: &str| {
+            let id = accessible_node(tree, name, Role::CheckBox);
+            let node = &tree.nodes.iter().find(|(node, _)| *node == id).unwrap().1;
+            node.toggled() == Some(egui::accesskit::Toggled::True)
+        };
+        assert!(checked(&tree, "Liked Songs"));
+        assert!(checked(&tree, "Daylight"), "it holds the song");
+        assert!(!checked(&tree, "Night drive"));
+
+        for name in ["Night drive", "Daylight"] {
+            let row = accessible_node(&tree, name, Role::CheckBox);
+            draw(
+                &mut app,
+                vec![accessible_action(row, AccessibleAction::Click, None)],
+            );
+        }
+        let tree = draw(&mut app, vec![]);
+        assert!(checked(&tree, "Night drive"));
+        assert!(!checked(&tree, "Daylight"));
+        assert!(app.actions.is_empty(), "nothing changes before Done");
+
+        let changes = checks.changes(&app, &item);
+        assert!(matches!(
+            changes,
+            Some(crate::model::Action::UpdatePlaylists { item: changed, add, remove })
+                if changed.uri() == item.uri()
+                    && add == [("drive".to_string(), "Night drive".to_string())]
+                    && remove == ["day"]
+        ));
+
+        app.playlist_pages.insert(
+            "drive".into(),
+            PlaylistPage {
+                items: PagedList {
+                    loaded_once: true,
+                    next_offset: None,
+                    ..Default::default()
+                },
+                ..PlaylistPage::default()
+            },
+        );
+        let checks = crate::ui::widgets::PlaylistChecks::new(&app, &item);
+        assert_eq!(checks.mark("drive"), Mark::Unchecked, "all rows read");
+        app.backend.shutdown();
+    }
+
+    /// The player bar's heart applies its checks on Done, asking about each
+    /// playlist it adds to, and a click outside drops them unapplied.
+    #[test]
+    fn the_hearts_done_applies_its_checks_and_a_click_outside_drops_them() {
+        use crate::backend::ApiRequest;
+        use egui::accesskit::{Action as AccessibleAction, Role};
+
+        let (ctx, mut app) = accessible_app("heart-checklist-done");
+        app.backend.set_offline(true);
+        let owner = app.user_id().unwrap().to_string();
+        let make = |id: &str, name: &str| Playlist {
+            id: id.into(),
+            uri: format!("spotify:playlist:{id}"),
+            name: name.into(),
+            owner: crate::api::models::Owner {
+                id: Some(owner.clone()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        app.library.playlists =
+            Loadable::Loaded(vec![make("drive", "Night drive"), make("day", "Daylight")]);
+        let click = |app: &mut App, label: &str, role: Role| {
+            let tree = accessible_frame(&ctx, app, vec![]);
+            let node = accessible_node(&tree, label, role);
+            accessible_frame(
+                &ctx,
+                app,
+                vec![accessible_action(node, AccessibleAction::Click, None)],
+            );
+            // A menu's first frame only measures it.
+            accessible_frame(&ctx, app, vec![]);
+        };
+        // Neither playlist was read in full, so both are checks to make.
+        let check_both = |app: &mut App| {
+            click(app, "Add to playlist", Role::Button);
+            click(app, "Night drive", Role::CheckBox);
+            click(app, "Daylight", Role::CheckBox);
+        };
+        let asked = |app: &App| -> Vec<String> {
+            app.backend
+                .take_playlist_add_requests()
+                .into_iter()
+                .filter_map(|request| match request {
+                    ApiRequest::CheckPlaylistDuplicates { playlist_id, .. } => Some(playlist_id),
+                    _ => None,
+                })
+                .collect()
+        };
+        accessible_frame(&ctx, &mut app, vec![]);
+        let now = app.now_playing().unwrap().uri;
+        assert_eq!(app.is_saved(&now), Some(true));
+
+        check_both(&mut app);
+        // The margin at the bar's left edge, beside the cover.
+        let outside = egui::pos2(6.0, 796.0);
+        accessible_frame(
+            &ctx,
+            &mut app,
+            pointer_click(outside, egui::PointerButton::Primary),
+        );
+        accessible_frame(&ctx, &mut app, vec![]);
+        assert!(asked(&app).is_empty(), "a click outside changes nothing");
+
+        // Kept checks would uncheck both here, and Done would ask nothing.
+        check_both(&mut app);
+        click(&mut app, "Done", Role::Button);
+        assert_eq!(asked(&app), ["drive", "day"]);
+        assert_eq!(app.is_saved(&now), Some(true), "it stays liked");
         app.backend.shutdown();
     }
 
@@ -9127,7 +9392,7 @@ mod tests {
                 "Keep music playing when the window closes",
                 "Start with your computer",
                 "Automatic update checks",
-                "Download updates automatically",
+                "Update automatically",
             ] {
                 let text = settings_text(&ctx, &mut app, title);
                 assert!(
@@ -9776,7 +10041,12 @@ mod tests {
             return;
         }
         for &locale in crate::i18n::Locale::value_variants() {
-            for flag in ["soloist-welcome", "soloist-pairing", "soloist-error"] {
+            for flag in [
+                "soloist-welcome",
+                "soloist-pairing",
+                "soloist-error",
+                "soloist-bad-build",
+            ] {
                 let (ctx, mut app) = accessible_app("soloist-narrow");
                 app.backend.set_offline(true);
                 apply_flags(&mut app, None, Some(&format!("soloist-onboarding,{flag}")));

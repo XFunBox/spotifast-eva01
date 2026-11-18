@@ -1,5 +1,5 @@
 title: Spotifast
-spotifast_version: "0.17.0"
+spotifast_version: "0.17.1"
 description: A fast, lightweight Spotify app for Linux, macOS, and Windows.
 lang: en-US
 timezone: Europe/Berlin
@@ -47,6 +47,8 @@ defaults:
       layout: default
 
 jekyll_vitepress:
+  versions:
+    next: true
   seo:
     page_type: TechArticle
     image:
